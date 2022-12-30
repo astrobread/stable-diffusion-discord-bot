@@ -47,7 +47,7 @@ if(config.hivePaymentAddress.length>0 && !creditsDisabled){
   cron.schedule('0 */12 * * *', () => { log('Recharging users with no credit every 12 hrs'.bgCyan.bold); freeRecharge() }) // Comment this out if you don't want free regular topups of low balance users
 }
 const bot = new Eris.CommandClient(config.discordBotKey, {
-  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "guildMessageReactions"],
+  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "directMessageReactions", "guildMessageReactions"],
   description: "Just a slave to the art, maaan",
   owner: "ausbitbank",
   prefix: "!",
@@ -308,7 +308,13 @@ function prepSlashCmd(options) { // Turn partial options into full command for s
   defaults.forEach(d=>{if(options.find(o=>{if(o.name===d.name){return true}else{return false}})){job[d.name]=options.find(o=>{if(o.name===d.name){return true}else{return false}}).value}else{job[d.name]=d.value}})
   return job
 }
-function getCmd(newJob){ return newJob.prompt+' --width ' + newJob.width + ' --height ' + newJob.height + ' --seed ' + newJob.seed + ' --scale ' + newJob.scale + ' --sampler ' + newJob.sampler + ' --steps ' + newJob.steps + ' --strength ' + newJob.strength + ' --n ' + newJob.number + ' --gfpgan_strength ' + newJob.gfpgan_strength + ' --codeformer_strength ' + newJob.codeformer_strength + ' --upscale_level ' + newJob.upscale_level + ' --upscale_strength ' + newJob.upscale_strength + ' --threshold ' + newJob.threshold + ' --perlin ' + newJob.perlin + ' --seamless ' + newJob.seamless + ' --hires_fix ' + newJob.hires_fix + ' --variation_amount ' + newJob.variation_amount + ' --with_variations ' + newJob.with_variations + ' --model ' + newJob.model}
+function getCmd(newJob){ 
+  // Apply mask for redream, TODO: simplify?
+  var cmd = newJob.prompt+' --width ' + newJob.width + ' --height ' + newJob.height + ' --seed ' + newJob.seed + ' --scale ' + newJob.scale + ' --sampler ' + newJob.sampler + ' --steps ' + newJob.steps + ' --strength ' + newJob.strength + ' --n ' + newJob.number + ' --gfpgan_strength ' + newJob.gfpgan_strength + ' --codeformer_strength ' + newJob.codeformer_strength + ' --upscale_level ' + newJob.upscale_level + ' --upscale_strength ' + newJob.upscale_strength + ' --threshold ' + newJob.threshold + ' --perlin ' + newJob.perlin + ' --seamless ' + newJob.seamless + ' --hires_fix ' + newJob.hires_fix + ' --variation_amount ' + newJob.variation_amount + ' --with_variations ' + newJob.with_variations + ' --model ' + newJob.model
+  if (newJob.text_mask)
+    cmd += ' --text_mask ' + newJob.text_mask
+  return cmd
+}
 function getRandomSeed(){return Math.floor(Math.random()*4294967295)}
 function chat(msg){if(msg!==null&&msg!==''){try{bot.createMessage(config.channelID, msg)}catch(err){log(err)}}}
 function chatChan(channel,msg){if(msg!==null&&msg!==''){try{bot.createMessage(channel, msg)}catch(err){log('Failed to send with error:'.bgRed);log(err)}}}
@@ -405,6 +411,22 @@ function freeRecharge(){
 }
 function dbWrite(){
   try{
+//// One-time purge of base64 image data from queue so it doesn't bloat, code in place to avoid pushing new image data in future
+//     let fixCount = 0
+//     queue.forEach(job=>{
+//       if (job.results && job.results.length > 0)
+//       {
+//         job.results.forEach(res => {
+//           if (res.attentionMaps)
+//           {
+//             res.attentionMaps = null;
+//             fixCount++;
+//           }
+//         });
+//       }
+//     });
+//     debugLog(fixCount)
+
     fs.writeFileSync('dbQueue.json',JSON.stringify({queue:queue}))
     fs.writeFileSync('dbUsers.json',JSON.stringify({users:users}))
     fs.writeFileSync('dbPayments.json',JSON.stringify({payments:payments}))
@@ -526,6 +548,7 @@ function sendWebhook(job){ // TODO eris has its own internal webhook method, inv
     .catch((error) => {console.error(error)})
 }
 function postprocessingResult(data){ // TODO unfinished, untested, awaiting new invokeai api release
+  debugLog("postprocessingResult")  
   log(data)
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
@@ -536,8 +559,11 @@ function postprocessingResult(data){ // TODO unfinished, untested, awaiting new 
 function requestModelChange(newmodel){log('Requesting model change to '+newmodel);if(newmodel===undefined||newmodel==='undefined'){newmodel=defaultModel}socket.emit('requestModelChange',newmodel,()=>{log('requestModelChange loaded')})}
 function cancelRenders(){log('Cancelling current render'.bgRed);socket.emit('cancel');queue[queue.findIndex((q)=>q.status==='rendering')-1].status='cancelled';rendering=false}
 function generationResult(data){
+  debugLog("generationResult")
+  debugLog(data.url)
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
+  debugLog(url)
   var job=queue[queue.findIndex(j=>j.status==='rendering')] // TODO there has to be a better way to know if this is a job from the web interface or the discord bot // upcoming invokeai api release solves this
   // todo detect all-black image result using jimp
   /*try{
@@ -551,10 +577,14 @@ function generationResult(data){
       if(p1===p2&&p2===p3){log('3 pixels match color, warn');data.warning=true}
     }
   }catch(err){log(err)}*/
+
+  // Prune out the attention map or it bloats our queue with image data
+  data.attentionMaps = null;
   if(job){job.results.push(data);var postRenderObject={id:job.id,filename: url, seed: data.metadata.image.seed, resultNumber:job.results.length-1, width:data.metadata.image.width,height:data.metadata.image.height};postRender(postRenderObject)}else{rendering=false}
-  if(job&&job.results.length>=job.number){job.status='done';rendering=false;processQueue()}
+    if (job && job.results.length >= job.number) { job.status = 'done'; debugLog(job); dbWrite(); rendering=false;processQueue()}
 }
 function initialImageUploaded(data){
+  debugLog("initialImageUploaded")
   var url=data.url
   var filename=config.basePath+"/"+data.url.replace('outputs/','')
   var id=data.url.split('/')[data.url.split('/').length-1].split('.')[0]
@@ -625,25 +655,59 @@ async function addRenderApi(id){
   }
   if (initimg!==null){
     debugLog('uploadInitialImage')
-    let writer=await fs.createWriteStream('attach.png').write(initimg)
-    let reader=fs.readFileSync('attach.png')
-    initimg=reader
-    let form = new FormData()
-    form.append("file",initimg,job.id+'.png')
-    form.append("data",JSON.stringify({kind:'init'}))
-    axios.post(config.apiUrl+'/upload',form,{headers:{...form.getHeaders()}})
-      .then((response)=>{
-        var filename=config.basePath+"/"+response.data.url.replace('outputs/','')
+    //// Rework due to issues on windows side, and skip pointless disk writing since we already have in memory (also avoids desync, shipping older attach.png instead of current one)
+    //let writer=await fs.createWriteStream('attach.png').write(initimg)
+    //let reader=fs.readFileSync('attach.png')
+    ////let reader=fs.createReadStream('attach.png')
+    //initimg=reader
+    let form = new FormData()    
+
+    form.append("data", JSON.stringify({kind:'init'}))//, {contentType:"application/json"})    
+    //form.append("file",initimg,job.id+'.png')
+    debugLog("going " + job.id+'.png')
+    form.append("file",initimg,
+       {
+         contentType: 'image/png',
+         filename: job.id+'.png',
+         //knownLength: fs.statSync('attach.png').size,
+       });
+    
+    //debugLog(form)
+    debugLog(form.getHeaders())
+
+    function getHeaders(form) {
+      return new Promise((resolve, reject) => {
+          form.getLength((err, length) => {
+              if(err) { reject(err); }
+              let headers = Object.assign({'Content-Length': length}, form.getHeaders());
+              resolve(headers);
+           });
+      });
+    }
+    getHeaders(form).then((headers) => {
+        return axios.post(config.apiUrl+'/upload', form, {headers:headers})
+    }).then((response)=>{
+          debugLog("initimg")
+          debugLog(response.data.url)
+
+        var filename=config.basePath+response.data.url.replace('outputs/',''); //.replace('/', '\\\\')
+        //var filename=config.basePath+"/"+response.data.url.replace('outputs/','')
+        debugLog(filename)
         job.init_img=filename
         job.initimg=null
         emitRenderApi(job)
       })
     .catch((error) => console.error(error))
+
+        //axios({method:'post',url:config.apiUrl+'/upload',data:form,'maxContentLength': Infinity,'maxBodyLength': Infinity,headers:{...form.getHeaders()}})
+    //axios.post(config.apiUrl+'/upload',form,{headers:{...form.getHeaders()}})
+    //axios.post(config.apiUrl+'/upload',form,{headers:form.getHeaders()})
   }else{
     emitRenderApi(job)
   }
 }
 async function postRender(render){
+  debugLog("postRender")
   try{fs.readFile(render.filename, null, function(err, data){
     if(err){console.error(err)}else{
       filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","")
@@ -823,9 +887,16 @@ function pedoScan(jobid){
   }
 }
 async function meme(prompt,urls,userid,channel){
+  debugLog("meme")
+  debugLog(prompt)
+  debugLog(urls)
+
   params = prompt.split(' ')
   cmd = prompt.split(' ')[0]
   param = undefined
+
+  debugLog(params)
+
   switch(cmd){
     case 'blur': var img = await new DIG.Blur(params[1]).getImage(urls[0]);break
     case 'gay': var img = await new DIG.Gay().getImage(urls[0]);break
@@ -833,7 +904,33 @@ async function meme(prompt,urls,userid,channel){
     case 'invert': var img = await new DIG.Invert().getImage(urls[0]);break
     case 'sepia': var img = await new DIG.Sepia().getImage(urls[0]);break
     case 'animate':
-    case 'blink': {if (urls.length>1){var img = await new DIG.Blink().getImage(...urls)};break} // Can take up to 10 images (discord limit) and make animations
+    // TODO: Make a separate command
+    case 'blink': 
+    {      
+      debugLog('l:' + queue.filter((j)=>j.seed==params[1]).length)
+      let urlseed = []
+      queue.filter((j)=>j.seed==params[1]).forEach((j) => {
+        j.results.forEach((r) => {
+          urlseed.push(config.basePath+r.url.replace('outputs/','')/*.replace('/', '\\\\')*/ )
+        })
+      })
+      debugLog(urlseed)
+//var filename=config.basePath+response.data.url.replace('outputs/','').replace('/', '\\\\')
+
+//      var gimmages =["S:\\discordiff\\InvokeAI\\invokeai\\out\\001597.20dcd820.1126973224.png",
+//        "S:\\discordiff\\InvokeAI\\invokeai\\out\\001596.08abe673.4124951696.png"];
+//      debugLog(gimmages)
+//      var img = await new DIG.Blink().getImage(1000, ...gimmages)
+
+      if (urls.length>1)
+      {
+        var img = await new DIG.Blink().getImage(...urls)
+      }
+      else if (urlseed.length > 1)
+      {
+        var img = await new DIG.Blink().getImage(1000, ...urlseed)
+      }
+    ;break} // Can take up to 10 images (discord limit) and make animations
     case 'triggered': var img = await new DIG.Triggered().getImage(urls[0]);break
     case 'ad': var img = await new DIG.Ad().getImage(urls[0]);break
     case 'affect': var img = await new DIG.Affect().getImage(urls[0]);break
@@ -917,6 +1014,7 @@ async function imgbbupload(file) {
     .catch((error)=>console.error(error))
 }
 function process (file){// Monitor new files entering watchFolder, post image with filename.
+  debugLog("process")
   try {
     if (file.endsWith('.png')||file.endsWith('jpg')){
       fs.readFile(file, null, function(err, data) {
@@ -987,11 +1085,15 @@ bot.on("interactionCreate", async (interaction) => {
           newJob.upscale_level = 2
           newJob.seed = interaction.data.custom_id.split('-')[2]
           newJob.variation_amount=0
-        } else { // Only a normal refresh should change the seed
+        } 
+        else if (interaction.data.custom_id.startsWith('refreshEdit-')){
+
+          newJob.prompt=interaction.data.components[0].components[0].value
+        }
+        else { // Only a normal refresh should change the seed
           newJob.variation_amount=0
           newJob.seed=getRandomSeed()
         }
-        if (interaction.data.custom_id.startsWith('refreshEdit-')){newJob.prompt=interaction.data.components[0].components[0].value}
         request({cmd: getCmd(newJob), userid: interaction.member.user.id, username: interaction.member.user.username, discriminator: interaction.member.user.discriminator, bot: interaction.member.user.bot, channelid: interaction.channel.id, attachments: newJob.attachments})
         if (interaction.data.custom_id.startsWith('refreshEdit-')){return interaction.editParent({}).catch((e)=>{console.error(e)})}else{return interaction.editParent({}).catch((e)=>{console.error(e)})}
       } else {
@@ -1224,8 +1326,20 @@ async function directMessageUser(id,msg,channel){ // try, fallback to channel
     if (channel&&channel.length>0){bot.createMessage(channel,msg).then(()=>{log('DM sent to '.dim+id)}).catch(() => log('failed to both dm a user or message in channel'.bgRed.white))}
   })
 }
+bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
+  debugLog("messageReactionAdd")
+  if (msg.author) 
+  {
+    targetUserId = reactor.user.id
+  }
+  else {
+    debugLog("FETCHING MESSAGE")
+    debugLog(reactor)
+    msg = await bot.getMessage(msg.channel.id, msg.id)
+    targetUserId = reactor.id
+  }
 
-bot.on("messageReactionAdd", (msg,emoji,reactor) => {
+   // TODO: Maybe sometimes targetUserId can come from other pathway despite msg being skinny?
   var embeds=false
   if (msg.embeds){embeds=dJSON.parse(JSON.stringify(msg.embeds))}
   if (embeds&&msg.attachments&&msg.attachments.length>0) {embeds.unshift({image:{url:msg.attachments[0].url}})}
@@ -1237,14 +1351,18 @@ bot.on("messageReactionAdd", (msg,emoji,reactor) => {
       case '👍':
       case '⭐':
       case '❤️': log('Positive emojis'.green+emoji.name); break
-      case '✉️': log('sending image to dm'.dim);directMessageUser(reactor.user.id,{content: msg.content, embeds: embeds});break // todo debug occasional error about reactor.user.id undefined here
+      case '✉️': log('sending image to dm'.dim);directMessageUser(targetUserId,{content: msg.content, embeds: embeds});break // todo debug occasional error about reactor.user.id undefined here
       case '👎':
       case '⚠️':
       case '🙈':
       case '❌':
       case '💩': {
-        log('Negative emojis'.red+emoji.name.red)
-        if(msg.content.includes(reactor.user.id)){msg.delete().catch(() => {})}
+        log('Negative emojis'.red+emoji.name.red); 
+        if(msg.content.includes(targetUserId))
+          {
+            debugLog("Deleting message!")
+            msg.delete().catch(() => {})
+          }
         break
       }
     }
@@ -1341,7 +1459,29 @@ bot.on("messageCreate", (msg) => {
       case '!random':{request({cmd: msg.content.substr(8,msg.content.length)+getRandom('prompt'), userid: msg.author.id, username: msg.author.username, discriminator: msg.author.discriminator, bot: msg.author.bot, channelid: msg.channel.id, attachments: msg.attachments});break}
       case '!recharge':rechargePrompt(msg.author.id,msg.channel.id);break
       case '!lexica':lexicaSearch(msg.content.substr(8, msg.content.length),msg.channel.id);break
-      case '!meme':{if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/')){meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)} else if (msg.content.startsWith('!meme lisapresentation')){meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)};break}
+      case '!meme':
+      {
+        if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/'))
+        {
+            meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
+        } 
+        else if (msg.content.startsWith('!meme lisapresentation'))
+        {
+            meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)
+        }
+        else if (msg.referencedMessage)
+        {
+            debugLog(msg.referencedMessage.attachments)
+            msg.attachments=msg.referencedMessage.attachments
+            meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
+        }
+        else
+        {
+          debugLog("Nothing to work with for meme")
+        }
+        break;
+        
+      }
       case '!avatar':{var avatars='';msg.mentions.forEach((m)=>{avatars+=m.avatarURL.replace('size=128','size=512')+'\n'});bot.createMessage(msg.channel.id,avatars);break}
       case '!background':{ // requires docker run -p 127.0.0.1:5000:5000 danielgatis/rembg s
         if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/')){
@@ -1586,7 +1726,8 @@ socket.on('error', (error) => {
   log('Api socket error'.bgRed);log(error)
   var nowJob=queue[queue.findIndex((j)=>j.status==="rendering")]
   if(nowJob){
-    log('Failing status for:');nowJob.status='failed';log(nowJob)
+    log('Failing status for:');nowJob.status='failed';log(nowJob);
+    dbWrite();
     chatChan(nowJob.channel,':warning: <@'+nowJob.userid+'>, there was an error in your request with prompt: `'+nowJob.prompt+'`\n**Error:** `'+error.message+'`\n')
   }
   rendering=false
