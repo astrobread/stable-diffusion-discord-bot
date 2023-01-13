@@ -160,14 +160,18 @@ var slashCommands = [
         lexicaSearch(query,i.channel.id)
       }
     }
-  },
-  {
+  }  
+]
+// If credits are active, add recharge otherwise don't include it
+if (!creditsDisabled)
+{
+  slashCommands.push({
     name: 'recharge',
     description: 'Recharge your render credits with Hive, HBD or Bitcoin over lightning network',
     cooldown: 500,
     execute: (i) => {if (i.member) {rechargePrompt(i.member.id,i.channel.id)} else if (i.user){rechargePrompt(i.user.id,i.channel.id)}}
-  }
-]
+  })
+}
 
 // Functions
 
@@ -710,7 +714,10 @@ async function postRender(render){
   debugLog("postRender")
   try{fs.readFile(render.filename, null, function(err, data){
     if(err){console.error(err)}else{
-      filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","")
+      // TODO: OS agnostic folder seperators
+      // NOTE: filename being wrong wasn't breaking because slashes get replaced automatically in createMessage, but makes filename long/ugly
+      //filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","")
+      filename=render.filename.split('/')[render.filename.split('/').length-1].replace(".png","")
       var job=queue[queue.findIndex(x=>x.id===render.id)]
       var msg=':brain:<@'+job.userid+'>'
       msg+=':straight_ruler:`'+render.width+'x'+render.height+'`'
@@ -726,7 +733,8 @@ async function postRender(render){
       if(job.variation_amount!==0){msg+=':microbe:**`Variation '+job.variation_amount+'`**'}
       //var jobResult = job.renders[render.resultNumber]
       if(render.variations){msg+=':linked_paperclips:with variants `'+render.variations+'`'}
-      msg+=':seedling:`'+render.seed+'`:scales:`'+job.scale+'`:recycle:`'+job.steps+'`'
+      // Added spaces to make it easier to double click the seed to copy/paste, otherwise discord selects whole line
+      msg+=':seedling: `'+render.seed+'` :scales:`'+job.scale+'`:recycle:`'+job.steps+'`'
       msg+=':stopwatch:`'+timeDiff(job.timestampRequested, moment())+'s`'
       if(showFilename){msg+=':file_cabinet:`'+filename+'`'}
       msg+=':eye:`'+job.sampler+'`'
@@ -909,11 +917,23 @@ async function meme(prompt,urls,userid,channel){
     {      
       debugLog('l:' + queue.filter((j)=>j.seed==params[1]).length)
       let urlseed = []
+      // For animating a seed, the image replied to is the stopping mark
+      // So collect every image url for seed until we reach that end point
+      var donemark = false; // did we hit the last frame
+      var stopUrl = null; // image url that is our last frame to animate
+      if (urls && urls.length > 0) { stopUrl = urls[0].split('/')[urls[0].split('/').length-1]; }
+      
       queue.filter((j)=>j.seed==params[1]).forEach((j) => {
-        j.results.forEach((r) => {
-          urlseed.push(config.basePath+r.url.replace('outputs/','')/*.replace('/', '\\\\')*/ )
+        j.results.forEach((r) => {        
+          if (donemark) {debugLog('SKIP');return;}
+          fileOnly = r.url.replace('outputs/','');
+          if (stopUrl == fileOnly) {donemark=true;}
+
+          var seedUrl = config.basePath+fileOnly; // TODO: PATH OPERATION
+          urlseed.push(seedUrl)
         })
       })
+      debugLog(urls)
       debugLog(urlseed)
 //var filename=config.basePath+response.data.url.replace('outputs/','').replace('/', '\\\\')
 
@@ -1350,7 +1370,13 @@ bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
       case '😂':
       case '👍':
       case '⭐':
-      case '❤️': log('Positive emojis'.green+emoji.name); break
+      case '❤️': 
+      {
+        // TODO: Add recording of favorites
+      	log('Positive emojis'.green+emoji.name);
+      	
+      	break
+      }
       case '✉️': log('sending image to dm'.dim);directMessageUser(targetUserId,{content: msg.content, embeds: embeds});break // todo debug occasional error about reactor.user.id undefined here
       case '👎':
       case '⚠️':
@@ -1701,7 +1727,40 @@ bot.on("messageCreate", (msg) => {
       case '!leaveguild':{bot.leaveGuild(msg.content.split(' ')[1]);break}
       case '!getmessages':{var cid=msg.content.split(' ')[1];if(cid){bot.getMessages(cid).then(x=>{x.reverse();x.forEach((y)=>{log(y.author.username.bgBlue+': '+y.content);y.attachments.map((u)=>{return u.proxy_url}).forEach((a)=>{log(a)})})})};break}
       case '!updateslashcommands':{bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
-      case '!deleteslashcommands':{bot.bulkEditCommands([]);bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
+      case '!deleteslashcommands':
+      {
+        // NOTE: Discord can enforce a 1-2 hour delay in updating commands
+        // This is an attempt at improving command updating before I knew the above.
+        // So it's possible the original method works but I was unable to verify.
+        
+        // This is to support having Model as a selection instead of free-form text.
+        // Models aren't known until talking to Invoke, so admin needs to kick this off
+        // to refresh the command once we know the list of models
+        
+	//bot.bulkEditCommands([]);
+	bot.getCommands().then(cmds=>
+	{
+	  const delCmds = cmds.map((c) => bot.deleteCommand(c.id)); // get all delete commands
+          Promise.all(delCmds).then(() => // once all deletes are done
+	  {	
+             debugLog("rebuilding commands");
+
+             if (models) // We've populated models so push them into the command
+             {
+               var modelCmd = slashCommands[0].options.filter((c) => c.name === 'model')[0]; // get dream command option 'model'
+               modelCmd.choices = Object.keys(models).map((m) => {return { name: m, value: m }});
+               debugLog(modelCmd.choices)
+             }
+			
+             bot.commands = new Collection();
+             for (const c of slashCommands) {			
+               bot.commands.set(c.name, c);
+               bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})
+             }
+           });
+	});
+	break
+      }
       case '!randomisers':{
         var newMsg='**Currently loaded randomisers**\n'
         for (r in randoms){newMsg+='`{'+randoms[r]+'}`='+getRandom(randoms[r])+'\n'}
