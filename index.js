@@ -47,7 +47,7 @@ if(config.hivePaymentAddress.length>0 && !creditsDisabled){
   cron.schedule('0 */12 * * *', () => { log('Recharging users with no credit every 12 hrs'.bgCyan.bold); freeRecharge() }) // Comment this out if you don't want free regular topups of low balance users
 }
 const bot = new Eris.CommandClient(config.discordBotKey, {
-  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "guildMessageReactions"],
+  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "directMessageReactions", "guildMessageReactions"],
   description: "Just a slave to the art, maaan",
   owner: "ausbitbank",
   prefix: "!",
@@ -164,14 +164,18 @@ var slashCommands = [
         lexicaSearch(query,i.channel.id)
       }
     }
-  },
-  {
+  }  
+]
+// If credits are active, add recharge otherwise don't include it
+if (!creditsDisabled)
+{
+  slashCommands.push({
     name: 'recharge',
     description: 'Recharge your render credits with Hive, HBD or Bitcoin over lightning network',
     cooldown: 500,
     execute: (i) => {if (i.member) {rechargePrompt(i.member.id,i.channel.id)} else if (i.user){rechargePrompt(i.user.id,i.channel.id)}}
-  }
-]
+  })
+}
 
 // Functions
 
@@ -354,6 +358,7 @@ function prepSlashCmd(options) { // Turn partial options into full command for s
   defaults.forEach(d=>{if(options.find(o=>{if(o.name===d.name){return true}else{return false}})){job[d.name]=options.find(o=>{if(o.name===d.name){return true}else{return false}}).value}else{job[d.name]=d.value}})
   return job
 }
+
 function getCmd(newJob){
   var cmd = newJob.prompt+' --width ' + newJob.width + ' --height ' + newJob.height + ' --seed ' + newJob.seed + ' --scale ' + newJob.scale + ' --sampler ' + newJob.sampler + ' --steps ' + newJob.steps + ' --strength ' + newJob.strength + ' --n ' + newJob.number + ' --gfpgan_strength ' + newJob.gfpgan_strength + ' --codeformer_strength ' + newJob.codeformer_strength + ' --upscale_level ' + newJob.upscale_level + ' --upscale_strength ' + newJob.upscale_strength + ' --threshold ' + newJob.threshold + ' --perlin ' + newJob.perlin + ' --seamless ' + newJob.seamless + ' --hires_fix ' + newJob.hires_fix + ' --variation_amount ' + newJob.variation_amount + ' --with_variations ' + newJob.with_variations + ' --model ' + newJob.model
   if(newJob.text_mask){cmd+=' --text_mask '+newJob.text_mask}
@@ -456,6 +461,22 @@ function freeRecharge(){
 }
 function dbWrite(){
   try{
+//// One-time purge of base64 image data from queue so it doesn't bloat, code in place to avoid pushing new image data in future
+//     let fixCount = 0
+//     queue.forEach(job=>{
+//       if (job.results && job.results.length > 0)
+//       {
+//         job.results.forEach(res => {
+//           if (res.attentionMaps)
+//           {
+//             res.attentionMaps = null;
+//             fixCount++;
+//           }
+//         });
+//       }
+//     });
+//     debugLog(fixCount)
+
     fs.writeFileSync('dbQueue.json',JSON.stringify({queue:queue}))
     fs.writeFileSync('dbUsers.json',JSON.stringify({users:users}))
     fs.writeFileSync('dbPayments.json',JSON.stringify({payments:payments}))
@@ -577,6 +598,7 @@ function sendWebhook(job){ // TODO eris has its own internal webhook method, inv
     .catch((error) => {console.error(error)})
 }
 function postprocessingResult(data){ // TODO unfinished, untested, awaiting new invokeai api release
+  debugLog("postprocessingResult")  
   log(data)
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
@@ -587,8 +609,11 @@ function postprocessingResult(data){ // TODO unfinished, untested, awaiting new 
 function requestModelChange(newmodel){log('Requesting model change to '+newmodel);if(newmodel===undefined||newmodel==='undefined'){newmodel=defaultModel}socket.emit('requestModelChange',newmodel,()=>{log('requestModelChange loaded')})}
 function cancelRenders(){log('Cancelling current render'.bgRed);socket.emit('cancel');queue[queue.findIndex((q)=>q.status==='rendering')-1].status='cancelled';rendering=false}
 function generationResult(data){
+  debugLog("generationResult")
+  debugLog(data.url)
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
+  debugLog(url)
   var job=queue[queue.findIndex(j=>j.status==='rendering')] // TODO there has to be a better way to know if this is a job from the web interface or the discord bot // upcoming invokeai api release solves this
   // todo detect all-black image result using jimp
   /*try{
@@ -602,6 +627,7 @@ function generationResult(data){
       if(p1===p2&&p2===p3){log('3 pixels match color, warn');data.warning=true}
     }
   }catch(err){log(err)}*/
+
   if(job){
     var postRenderObject={id:job.id,filename: url, seed: data.metadata.image.seed, resultNumber:job.results.length-1, width:data.metadata.image.width,height:data.metadata.image.height}
     // remove redundant data before pushing to db results
@@ -609,9 +635,10 @@ function generationResult(data){
     job.results.push(data)
     postRender(postRenderObject)
   }else{rendering=false}
-  if(job&&job.results.length>=job.number){job.status='done';rendering=false;processQueue()}
+  if(job&&job.results.length>=job.number){job.status='done';debugLog(job);dbWrite();rendering=false;processQueue()}
 }
 function initialImageUploaded(data){
+  debugLog("initialImageUploaded")
   var url=data.url
   var filename=config.basePath+"/"+data.url.replace('outputs/','')
   var id=data.url.split('/')[data.url.split('/').length-1].split('.')[0]
@@ -681,6 +708,7 @@ async function addRenderApi(id){
   }
   if (initimg!==null){
     debugLog('uploadInitialImage')
+
     let form = new FormData()
     form.append("data",JSON.stringify({kind:'init'}))
     form.append("file",initimg,{contentType:'image/png',filename:job.id+'.png'})
@@ -707,9 +735,13 @@ async function addRenderApi(id){
   }
 }
 async function postRender(render){
+  debugLog("postRender")
   try{fs.readFile(render.filename, null, function(err, data){
     if(err){console.error(err)}else{
-      filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","")
+      // TODO: OS agnostic folder seperators
+      // NOTE: filename being wrong wasn't breaking because slashes get replaced automatically in createMessage, but makes filename long/ugly
+      //filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","")
+      filename=render.filename.split('/')[render.filename.split('/').length-1].replace(".png","")
       var job=queue[queue.findIndex(x=>x.id===render.id)]
       var msg=':brain:<@'+job.userid+'>'
       msg+=':straight_ruler:`'+render.width+'x'+render.height+'`'
@@ -725,7 +757,8 @@ async function postRender(render){
       if(job.variation_amount!==0){msg+=':microbe:**`Variation '+job.variation_amount+'`**'}
       //var jobResult = job.renders[render.resultNumber]
       if(render.variations){msg+=':linked_paperclips:with variants `'+render.variations+'`'}
-      msg+=':seedling:`'+render.seed+'`:scales:`'+job.scale+'`:recycle:`'+job.steps+'`'
+      // Added spaces to make it easier to double click the seed to copy/paste, otherwise discord selects whole line
+      msg+=':seedling: `'+render.seed+'` :scales:`'+job.scale+'`:recycle:`'+job.steps+'`'
       msg+=':stopwatch:`'+timeDiff(job.timestampRequested, moment())+'s`'
       if(showFilename){msg+=':file_cabinet:`'+filename+'`'}
       msg+=':eye:`'+job.sampler+'`'
@@ -833,9 +866,16 @@ function lexicaSearch(query,channel){
 lexicaSearch=debounce(lexicaSearch,1000,true)
 
 async function meme(prompt,urls,userid,channel){
+  debugLog("meme")
+  debugLog(prompt)
+  debugLog(urls)
+
   params = prompt.split(' ')
   cmd = prompt.split(' ')[0]
   param = undefined
+
+  debugLog(params)
+
   switch(cmd){
     case 'blur': var img = await new DIG.Blur(params[1]).getImage(urls[0]);break
     case 'gay': var img = await new DIG.Gay().getImage(urls[0]);break
@@ -843,17 +883,42 @@ async function meme(prompt,urls,userid,channel){
     case 'invert': var img = await new DIG.Invert().getImage(urls[0]);break
     case 'sepia': var img = await new DIG.Sepia().getImage(urls[0]);break
     case 'animateseed':{
-      let urlseed=[]
-      queue.filter((j)=>j.seed==params[1]&&j.userid===userid).forEach((j)=>{j.results.forEach((r)=>{urlseed.push(config.basePath+r.url.replace('outputs/',''))})})
+      debugLog('l:' + queue.filter((j)=>j.seed==params[1]).length)
+      let urlseed=[]      
+      // For animating a seed, the image replied to is the stopping mark
+      // So collect every image url for seed until we reach that end point
+      var donemark = false; // did we hit the last frame
+      var stopUrl = null; // image url that is our last frame to animate
+      if (urls && urls.length > 0) { stopUrl = urls[0].split('/')[urls[0].split('/').length-1]; }
+      
+      // NOTE: My version doesn't filter on userid because intent is collaborative (take turns modding prompts, animate result)
+      // TODO: Add limits and maybe date range, so this doesn't try animating 1000 images
+      //queue.filter((j)=>j.seed==params[1]&&j.userid===userid).forEach((j)=>{j.results.forEach((r)=>{urlseed.push(config.basePath+r.url.replace('outputs/',''))})})
+      queue.filter((j)=>j.seed==params[1]).forEach((j) => {
+        j.results.forEach((r) => {        
+          if (donemark) {return;}
+          fileOnly = r.url.replace('outputs/','');
+          if (stopUrl == fileOnly) {donemark=true;}
+
+          var seedUrl = config.basePath+fileOnly; // TODO: PATH OPERATION
+          urlseed.push(seedUrl)
+        })
+      })
+      
+      debugLog(urls)
+      debugLog(urlseed)      
+      
       if (urlseed.length>1){var img = await new DIG.Blink().getImage(...urlseed)}
     }
     case 'animate':
+
     case 'blink': {
       if (urls.length>1){
         var img = await new DIG.Blink().getImage(...urls)
       }
       break
       } // Can take up to 10 images (discord limit) and make animations
+
     case 'triggered': var img = await new DIG.Triggered().getImage(urls[0]);break
     case 'ad': var img = await new DIG.Ad().getImage(urls[0]);break
     case 'affect': var img = await new DIG.Affect().getImage(urls[0]);break
@@ -949,6 +1014,7 @@ async function imgbbupload(file) {
     .catch((error)=>console.error(error))
 }
 function process (file){// Monitor new files entering watchFolder, post image with filename.
+  debugLog("process")
   try {
     if (file.endsWith('.png')||file.endsWith('jpg')){
       fs.readFile(file, null, function(err, data) {
@@ -1019,6 +1085,7 @@ bot.on("interactionCreate", async (interaction) => {
           newJob.upscale_level = 2
           newJob.seed = interaction.data.custom_id.split('-')[2]
           newJob.variation_amount=0
+
         } else if (interaction.data.custom_id.startsWith('refreshEdit-')){
           newJob.prompt=interaction.data.components[0].components[0].value
         } else { // Only a normal refresh should change the seed
@@ -1260,9 +1327,22 @@ async function directMessageUser(id,msg,channel){ // try, fallback to channel
     if (channel&&channel.length>0){bot.createMessage(channel,msg).then(()=>{log('DM sent to '.dim+id)}).catch(() => log('failed to both dm a user or message in channel'.bgRed.white))}
   })
 }
+bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
+  debugLog("messageReactionAdd")
+  if (msg.author) 
+  {
+    targetUserId = reactor.user.id
+  }
+  else {
+    debugLog("FETCHING MESSAGE")
+    debugLog(reactor)
+    msg = await bot.getMessage(msg.channel.id, msg.id)
+    targetUserId = reactor.id
+  }
 
 bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
   if (msg.author){targetUserId=reactor.user.id}else{msg=await bot.getMessage(msg.channel.id,msg.id);targetUserId=reactor.id}
+
   var embeds=false
   if (msg.embeds){embeds=dJSON.parse(JSON.stringify(msg.embeds))}
   if (embeds&&msg.attachments&&msg.attachments.length>0) {embeds.unshift({image:{url:msg.attachments[0].url}})}
@@ -1271,15 +1351,25 @@ bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
       case '😂':
       case '👍':
       case '⭐':
-      case '❤️': log('Positive emojis'.green+emoji.name); break
+      case '❤️': 
+      {
+        // TODO: Add recording of favorites
+      	log('Positive emojis'.green+emoji.name);      	
+      	break
+      }
+
       case '✉️': log('sending image to dm'.dim);directMessageUser(targetUserId,{content: msg.content, embeds: embeds});break // todo debug occasional error about reactor.user.id undefined here
       case '👎':
       case '⚠️':
       case '🙈':
       case '❌':
       case '💩': {
-        log('Negative emojis'.red+emoji.name.red)
-        if(msg.content.includes(reactor.user.id)){msg.delete().catch(() => {})}
+        log('Negative emojis'.red+emoji.name.red); 
+        if(msg.content.includes(targetUserId))
+          {
+            debugLog("Deleting message!")
+            msg.delete().catch(() => {})
+          }
         break
       }
     }
@@ -1377,7 +1467,27 @@ bot.on("messageCreate", (msg) => {
       case '!random':{request({cmd: msg.content.substr(8,msg.content.length)+getRandom('prompt'), userid: msg.author.id, username: msg.author.username, discriminator: msg.author.discriminator, bot: msg.author.bot, channelid: msg.channel.id, attachments: msg.attachments});break}
       case '!recharge':rechargePrompt(msg.author.id,msg.channel.id);break
       case '!lexica':lexicaSearch(msg.content.substr(8, msg.content.length),msg.channel.id);break
-      case '!meme':{if (msg.content.startsWith('!meme lisapresentation')){meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)}else{meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)};break}
+      case '!meme':
+      {
+        // TODO: Think lisa's urls are undefined? check after merge
+        if (msg.content.startsWith('!meme lisapresentation'))
+        {meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)}
+        
+        // Supply urls attached to our message
+        else if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/'))
+        {
+            meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
+        } 
+        // Supply image url of what we replied to
+        else if (msg.referencedMessage)
+        {
+            meme(msg.content.substr(6, msg.content.length),msg.referencedMessage.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
+        }
+        else {debugLog("Nothing to work with for meme")}
+        break;
+        
+      }
+
       case '!avatar':{var avatars='';msg.mentions.forEach((m)=>{avatars+=m.avatarURL.replace('size=128','size=512')+'\n'});bot.createMessage(msg.channel.id,avatars);break}
       case '!background':{ // requires docker run -p 127.0.0.1:5000:5000 danielgatis/rembg s
         if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/')){
@@ -1617,7 +1727,40 @@ bot.on("messageCreate", (msg) => {
       case '!leaveguild':{bot.leaveGuild(msg.content.split(' ')[1]);break}
       case '!getmessages':{var cid=msg.content.split(' ')[1];if(cid){bot.getMessages(cid).then(x=>{x.reverse();x.forEach((y)=>{log(y.author.username.bgBlue+': '+y.content);y.attachments.map((u)=>{return u.proxy_url}).forEach((a)=>{log(a)})})})};break}
       case '!updateslashcommands':{bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
-      case '!deleteslashcommands':{bot.bulkEditCommands([]);bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
+      case '!deleteslashcommands':
+      {
+        // NOTE: Discord can enforce a 1-2 hour delay in updating commands
+        // This is an attempt at improving command updating before I knew the above.
+        // So it's possible the original method works but I was unable to verify.
+        
+        // This is to support having Model as a selection instead of free-form text.
+        // Models aren't known until talking to Invoke, so admin needs to kick this off
+        // to refresh the command once we know the list of models
+        
+	//bot.bulkEditCommands([]);
+	bot.getCommands().then(cmds=>
+	{
+	  const delCmds = cmds.map((c) => bot.deleteCommand(c.id)); // get all delete commands
+          Promise.all(delCmds).then(() => // once all deletes are done
+	  {	
+             debugLog("rebuilding commands");
+
+             if (models) // We've populated models so push them into the command
+             {
+               var modelCmd = slashCommands[0].options.filter((c) => c.name === 'model')[0]; // get dream command option 'model'
+               modelCmd.choices = Object.keys(models).map((m) => {return { name: m, value: m }});
+               debugLog(modelCmd.choices)
+             }
+			
+             bot.commands = new Collection();
+             for (const c of slashCommands) {			
+               bot.commands.set(c.name, c);
+               bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})
+             }
+           });
+	});
+	break
+      }
       case '!randomisers':{
         var newMsg='**Currently loaded randomisers**\n'
         for (r in randoms){newMsg+='`{'+randoms[r]+'}`='+getRandom(randoms[r])+'\n'}
@@ -1660,7 +1803,8 @@ socket.on('error', (error) => {
   log('Api socket error'.bgRed);log(error)
   var nowJob=queue[queue.findIndex((j)=>j.status==="rendering")]
   if(nowJob){
-    log('Failing status for:');nowJob.status='failed';log(nowJob)
+    log('Failing status for:');nowJob.status='failed';log(nowJob);
+    dbWrite();
     chatChan(nowJob.channel,':warning: <@'+nowJob.userid+'>, there was an error in your request with prompt: `'+nowJob.prompt+'`\n**Error:** `'+error.message+'`\n')
   }
   rendering=false
