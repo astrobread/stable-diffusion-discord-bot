@@ -62,6 +62,8 @@ const maxSteps = parseInt(config.maxSteps)||100
 const maxIterations = parseInt(config.maxIterations)||10
 const defaultMaxDiscordFileSize=parseInt(config.defaultMaxDiscordFileSize)||8000000  // TODO detect server boost status and increase this if boosted
 const basePath = config.basePath
+
+const maxAnimateImages = 100 // Only will fetch most recent X images for animating
 var rembg=config.rembg||'http://127.0.0.1:5000?url='
 var defaultModel=config.defaultModel||'stable-diffusion-1.5'
 var currentModel='notInitializedYet'
@@ -863,7 +865,7 @@ async function meme(prompt,urls,userid,channel){
     case 'sepia': var img = await new DIG.Sepia().getImage(urls[0]);break
     case 'animateseed':{
       debugLog('l:' + queue.filter((j)=>j.seed==params[1]).length)
-      let urlseed=[]      
+      let urlseed=[]
       // For animating a seed, the image replied to is the stopping mark
       // So collect every image url for seed until we reach that end point
       var donemark = false; // did we hit the last frame
@@ -871,7 +873,6 @@ async function meme(prompt,urls,userid,channel){
       if (urls && urls.length > 0) { stopUrl = urls[0].split('/')[urls[0].split('/').length-1]; }
       
       // NOTE: My version doesn't filter on userid because intent is collaborative (take turns modding prompts, animate result)
-      // TODO: Add limits and maybe date range, so this doesn't try animating 1000 images
       //queue.filter((j)=>j.seed==params[1]&&j.userid===userid).forEach((j)=>{j.results.forEach((r)=>{urlseed.push(config.basePath+r.url.replace('outputs/',''))})})
       queue.filter((j)=>j.seed==params[1]).forEach((j) => {
         j.results.forEach((r) => {        
@@ -883,17 +884,17 @@ async function meme(prompt,urls,userid,channel){
           urlseed.push(seedUrl)
         })
       })
-      
-      debugLog(urls)
-      debugLog(urlseed)      
-      
-      if (urlseed.length>1){var img = await new DIG.Blink().getImage(...urlseed)}
+            
+      debugLog(urlseed)
+      var delay = parseInt(params[2]) || 1000
+	
+      if (urlseed.length>1){var img = await new DIG.Blink().getImage(delay, ...urlseed.slice(-1 * maxAnimateImages))}
       break
     }
     case 'animate':
     case 'blink': {
       if (urls.length>1){
-        var img = await new DIG.Blink().getImage(...urls)
+        var img = await new DIG.Blink().getImage(...urls.slice(-1 * maxAnimateImages))
       }
       break
       } // Can take up to 10 images (discord limit) and make animations
@@ -1433,10 +1434,10 @@ bot.on("messageCreate", (msg) => {
       case '!lexica':lexicaSearch(msg.content.substr(8, msg.content.length),msg.channel.id);break
       case '!meme':
       {
-        // TODO: Think lisa's urls are undefined? check after merge
+        // Yep 'urls' not defined, send null instead 
         if (msg.content.startsWith('!meme lisapresentation'))
-        {meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)}
-        
+        {meme(msg.content.substr(6, msg.content.length),null,msg.author.id,msg.channel.id)}
+               
         // Supply urls attached to our message
         else if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/'))
         {
@@ -1447,6 +1448,11 @@ bot.on("messageCreate", (msg) => {
         {
             meme(msg.content.substr(6, msg.content.length),msg.referencedMessage.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
         }
+        
+        // We're animating seed without replying or attaching, just animate using seed lookup
+        else if (msg.content.startsWith('!meme animateseed'))
+        {meme(msg.content.substr(6, msg.content.length),null,msg.author.id,msg.channel.id)}
+        
         else {debugLog("Nothing to work with for meme")}
         break;
         
