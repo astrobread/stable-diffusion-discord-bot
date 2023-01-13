@@ -47,7 +47,7 @@ if(config.hivePaymentAddress.length>0 && !creditsDisabled){
   cron.schedule('0 */12 * * *', () => { log('Recharging users with no credit every 12 hrs'.bgCyan.bold); freeRecharge() }) // Comment this out if you don't want free regular topups of low balance users
 }
 const bot = new Eris.CommandClient(config.discordBotKey, {
-  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "directMessageReactions", "guildMessageReactions"],
+  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "guildMessageReactions"],
   description: "Just a slave to the art, maaan",
   owner: "ausbitbank",
   prefix: "!",
@@ -358,7 +358,6 @@ function prepSlashCmd(options) { // Turn partial options into full command for s
   defaults.forEach(d=>{if(options.find(o=>{if(o.name===d.name){return true}else{return false}})){job[d.name]=options.find(o=>{if(o.name===d.name){return true}else{return false}}).value}else{job[d.name]=d.value}})
   return job
 }
-
 function getCmd(newJob){
   var cmd = newJob.prompt+' --width ' + newJob.width + ' --height ' + newJob.height + ' --seed ' + newJob.seed + ' --scale ' + newJob.scale + ' --sampler ' + newJob.sampler + ' --steps ' + newJob.steps + ' --strength ' + newJob.strength + ' --n ' + newJob.number + ' --gfpgan_strength ' + newJob.gfpgan_strength + ' --codeformer_strength ' + newJob.codeformer_strength + ' --upscale_level ' + newJob.upscale_level + ' --upscale_strength ' + newJob.upscale_strength + ' --threshold ' + newJob.threshold + ' --perlin ' + newJob.perlin + ' --seamless ' + newJob.seamless + ' --hires_fix ' + newJob.hires_fix + ' --variation_amount ' + newJob.variation_amount + ' --with_variations ' + newJob.with_variations + ' --model ' + newJob.model
   if(newJob.text_mask){cmd+=' --text_mask '+newJob.text_mask}
@@ -461,22 +460,6 @@ function freeRecharge(){
 }
 function dbWrite(){
   try{
-//// One-time purge of base64 image data from queue so it doesn't bloat, code in place to avoid pushing new image data in future
-//     let fixCount = 0
-//     queue.forEach(job=>{
-//       if (job.results && job.results.length > 0)
-//       {
-//         job.results.forEach(res => {
-//           if (res.attentionMaps)
-//           {
-//             res.attentionMaps = null;
-//             fixCount++;
-//           }
-//         });
-//       }
-//     });
-//     debugLog(fixCount)
-
     fs.writeFileSync('dbQueue.json',JSON.stringify({queue:queue}))
     fs.writeFileSync('dbUsers.json',JSON.stringify({users:users}))
     fs.writeFileSync('dbPayments.json',JSON.stringify({payments:payments}))
@@ -610,10 +593,8 @@ function requestModelChange(newmodel){log('Requesting model change to '+newmodel
 function cancelRenders(){log('Cancelling current render'.bgRed);socket.emit('cancel');queue[queue.findIndex((q)=>q.status==='rendering')-1].status='cancelled';rendering=false}
 function generationResult(data){
   debugLog("generationResult")
-  debugLog(data.url)
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
-  debugLog(url)
   var job=queue[queue.findIndex(j=>j.status==='rendering')] // TODO there has to be a better way to know if this is a job from the web interface or the discord bot // upcoming invokeai api release solves this
   // todo detect all-black image result using jimp
   /*try{
@@ -627,7 +608,6 @@ function generationResult(data){
       if(p1===p2&&p2===p3){log('3 pixels match color, warn');data.warning=true}
     }
   }catch(err){log(err)}*/
-
   if(job){
     var postRenderObject={id:job.id,filename: url, seed: data.metadata.image.seed, resultNumber:job.results.length-1, width:data.metadata.image.width,height:data.metadata.image.height}
     // remove redundant data before pushing to db results
@@ -708,7 +688,6 @@ async function addRenderApi(id){
   }
   if (initimg!==null){
     debugLog('uploadInitialImage')
-
     let form = new FormData()
     form.append("data",JSON.stringify({kind:'init'}))
     form.append("file",initimg,{contentType:'image/png',filename:job.id+'.png'})
@@ -912,14 +891,12 @@ async function meme(prompt,urls,userid,channel){
       break
     }
     case 'animate':
-
     case 'blink': {
       if (urls.length>1){
         var img = await new DIG.Blink().getImage(...urls)
       }
       break
       } // Can take up to 10 images (discord limit) and make animations
-
     case 'triggered': var img = await new DIG.Triggered().getImage(urls[0]);break
     case 'ad': var img = await new DIG.Ad().getImage(urls[0]);break
     case 'affect': var img = await new DIG.Affect().getImage(urls[0]);break
@@ -1086,7 +1063,6 @@ bot.on("interactionCreate", async (interaction) => {
           newJob.upscale_level = 2
           newJob.seed = interaction.data.custom_id.split('-')[2]
           newJob.variation_amount=0
-
         } else if (interaction.data.custom_id.startsWith('refreshEdit-')){
           newJob.prompt=interaction.data.components[0].components[0].value
         } else { // Only a normal refresh should change the seed
@@ -1331,7 +1307,6 @@ async function directMessageUser(id,msg,channel){ // try, fallback to channel
 
 bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
   if (msg.author){targetUserId=reactor.user.id}else{msg=await bot.getMessage(msg.channel.id,msg.id);targetUserId=reactor.id}
-
   var embeds=false
   if (msg.embeds){embeds=dJSON.parse(JSON.stringify(msg.embeds))}
   if (embeds&&msg.attachments&&msg.attachments.length>0) {embeds.unshift({image:{url:msg.attachments[0].url}})}
@@ -1792,7 +1767,7 @@ socket.on('error', (error) => {
   log('Api socket error'.bgRed);log(error)
   var nowJob=queue[queue.findIndex((j)=>j.status==="rendering")]
   if(nowJob){
-    log('Failing status for:');nowJob.status='failed';log(nowJob);
+    log('Failing status for:');nowJob.status='failed';log(nowJob)
     dbWrite();
     chatChan(nowJob.channel,':warning: <@'+nowJob.userid+'>, there was an error in your request with prompt: `'+nowJob.prompt+'`\n**Error:** `'+error.message+'`\n')
   }
