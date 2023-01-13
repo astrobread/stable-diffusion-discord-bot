@@ -1327,18 +1327,6 @@ async function directMessageUser(id,msg,channel){ // try, fallback to channel
     if (channel&&channel.length>0){bot.createMessage(channel,msg).then(()=>{log('DM sent to '.dim+id)}).catch(() => log('failed to both dm a user or message in channel'.bgRed.white))}
   })
 }
-bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
-  debugLog("messageReactionAdd")
-  if (msg.author) 
-  {
-    targetUserId = reactor.user.id
-  }
-  else {
-    debugLog("FETCHING MESSAGE")
-    debugLog(reactor)
-    msg = await bot.getMessage(msg.channel.id, msg.id)
-    targetUserId = reactor.id
-  }
 
 bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
   if (msg.author){targetUserId=reactor.user.id}else{msg=await bot.getMessage(msg.channel.id,msg.id);targetUserId=reactor.id}
