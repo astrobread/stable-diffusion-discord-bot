@@ -58,6 +58,8 @@ const bot = new Eris.CommandClient(config.discordBotKey, {
 const defaultSize = parseInt(config.defaultSize)||512
 const defaultSteps = parseInt(config.defaultSteps)||50
 const defaultScale = parseFloat(config.defaultScale)||7.5
+const maxSteps = parseInt(config.maxSteps)||100
+const maxIterations = parseInt(config.maxIterations)||10
 const defaultMaxDiscordFileSize=parseInt(config.defaultMaxDiscordFileSize)||8000000  // TODO detect server boost status and increase this if boosted
 const basePath = config.basePath
 var rembg=config.rembg||'http://127.0.0.1:5000?url='
@@ -79,7 +81,9 @@ var randoms=[]
 try{
   fs.readdir('txt',(err,files)=>{
     if(err){log('Unable to read txt file directory'.bgRed);log(err)}
-    files.forEach((file)=>{if (file.includes('.txt')){log('Adding text file: '.dim+file.replace('.txt',''));randoms.push(file.replace('.txt',''))}})
+    files.forEach((file)=>{if (file.includes('.txt')){randoms.push(file.replace('.txt',''))}})
+      debugLog('Enabled randomisers:')
+      debugLog(randoms)
   })
 }catch(err){log('Unable to read txt file directory'.bgRed);log(err)}
 if(randoms.includes('prompt')){randoms.splice(randoms.indexOf('prompt'),1);randoms.splice(0,0,'prompt')} // Prompt should be interpreted first
@@ -91,8 +95,8 @@ var slashCommands = [
     description: 'Create a new image from your prompt',
     options: [
       {type: 3, name: 'prompt', description: 'what would you like to see ?', required: true, min_length: 1, max_length:750 },
-      {type: 4, name: 'width', description: 'width of the image in pixels (250-~1024)', required: false, min_value: 256, max_value: 1024 },
-      {type: 4, name: 'height', description: 'height of the image in pixels (250-~1024)', required: false, min_value: 256, max_value: 1024 },
+      {type: 4, name: 'width', description: 'width of the image in pixels (250-~1024)', required: false, min_value: 256, max_value: 1280 },
+      {type: 4, name: 'height', description: 'height of the image in pixels (250-~1024)', required: false, min_value: 256, max_value: 1280 },
       {type: 4, name: 'steps', description: 'how many steps to render for (10-250)', required: false, min_value: 5, max_value: 250 },
       {type: 4, name: 'seed', description: 'seed (initial noise pattern)', required: false},
       {type: 10, name: 'strength', description: 'how much noise to add to your template image (0.1-0.9)', required: false, min_value:0.01, max_value:0.99},
@@ -202,18 +206,18 @@ function request(request){
     args.width=parseInt(args.width);args.height=parseInt(args.height)
     log('compromised resolution to '+args.width+'x'+args.height)
   }
-  if (!args.steps||!Number.isInteger(args.steps)||args.steps>250){args.steps=defaultSteps} // max 250 steps, default 50
+  if (!args.steps||!Number.isInteger(args.steps)||args.steps>maxSteps){args.steps=defaultSteps} // default 50
   if (!args.seed||!Number.isInteger(args.seed)||args.seed<1||args.seed>4294967295){args.seed=getRandomSeed()}
   if (!args.strength||args.strength>=1||args.strength<=0){args.strength=0.75}
   if (!args.scale||args.scale>200||args.scale<1){args.scale=defaultScale}
   if (!args.sampler){args.sampler=defaultSampler}
   if (args.n){args.number=args.n}
-  if (!args.number||!Number.isInteger(args.number)||args.number>10||args.number<1){args.number=1}
+  if (!args.number||!Number.isInteger(args.number)||args.number>maxIterations||args.number<1){args.number=1}
   if (!args.renderer||['localApi'].includes(args.renderer)){args.renderer='localApi'}
   if (!args.gfpgan_strength){args.gfpgan_strength=0}
   if (!args.codeformer_strength){args.codeformer_strength=0}
   if (!args.upscale_level){args.upscale_level=''}
-  if (!args.upscale_strength){args.upscale_strength=0.75}
+  if (!args.upscale_strength){args.upscale_strength=0.5}
   if (!args.variation_amount||args.variation_amount>1||args.variation_amount<0){args.variation_amount=0}
   if (!args.with_variations){args.with_variations=[]}else{log(args.with_variations)}//; args.with_variations=args.with_variations.toString()
   if (!args.threshold){args.threshold=0}
@@ -266,18 +270,18 @@ function request(request){
   processQueue()
   // acknowledge received job with ethereal message here?
 }
+
 function queueStatus() {
-  if(dialogs.queue!==null){dialogs.queue.delete().catch((err)=>{debugLog(err)})}
-  var done=queue.filter((j)=>j.status==='done')
-  var doneGps=tidyNumber((getPixelStepsTotal(done)/1000000).toFixed(0))
-  var wait=queue.filter((j)=>j.status==='new')
-  var waitGps=tidyNumber((getPixelStepsTotal(wait)/1000000).toFixed(0))
+  //debugLog('queuestatus fire')
+  //var done=queue.filter((j)=>j.status==='done')
+  //var doneGps=tidyNumber((getPixelStepsTotal(done)/1000000).toFixed(0))
+  //var wait=queue.filter((j)=>j.status==='new')
+  //var waitGps=tidyNumber((getPixelStepsTotal(wait)/1000000).toFixed(0))
+  //var totalWaitLength=parseInt(wait.length)+parseInt(renderq.length)
+  //var totalWaitGps=parseInt(waitGps)+parseInt(renderGps)
   var renderq=queue.filter((j)=>j.status==='rendering')
   var renderGps=tidyNumber((getPixelStepsTotal(renderq)/1000000).toFixed(0))
-  var totalWaitLength=parseInt(wait.length)+parseInt(renderq.length)
-  var totalWaitGps=parseInt(waitGps)+parseInt(renderGps)
-  var statusMsg=':busts_in_silhouette: `'+queue.map(x=>x.userid).filter(unique).length+'`/`'+users.length+'` :european_castle:`'+bot.guilds.size+'` :fire: `'+doneGps+'`'
-  if(totalWaitLength>0){statusMsg=':ticket:`'+totalWaitLength+'`(`'+totalWaitGps+'`) '+statusMsg} else {statusMsg=':ticket:`'+totalWaitLength+'`'+statusMsg}
+  var statusMsg=''
   if(renderq.length>0){
     var next = renderq[0]
     statusMsg+='\n:track_next:'
@@ -293,11 +297,53 @@ function queueStatus() {
     if(next.init_img && next.init_img!==''){statusMsg+=':paperclip:'}
     if((next.width!==next.height)||(next.width>defaultSize)){statusMsg+=':straight_ruler:'}
     statusMsg+=' :brain: **'+next.username+'**#'+next.discriminator+' :coin:`'+costCalculator(next)+'` :fire:`'+renderGps+'`'
+    //if(progressUpdate['isProcessing']===true){
+      var renderPercent=((parseInt(progressUpdate['currentStep'])/parseInt(progressUpdate['totalSteps']))*100).toFixed(2)
+      var renderPercentEmoji=':hourglass_flowing_sand:'
+      if(renderPercent>50){renderPercentEmoji=':hourglass:'}
+      statusMsg+=renderPercentEmoji+'`'+renderPercent+'%` - '+progressUpdate['currentStatus']
+
+    //}
+    //statusMsg+='\n:busts_in_silhouette: `'+queue.map(x=>x.userid).filter(unique).length+'`/`'+users.length+'` :european_castle:`'+bot.guilds.size+'` :fire: `'+doneGps+'`'
+    //if(totalWaitLength>0){statusMsg=':ticket:`'+totalWaitLength+'`(`'+totalWaitGps+'`) '+statusMsg} else {statusMsg=':ticket:`'+totalWaitLength+'`'+statusMsg}
+    var statusObj={content:statusMsg}
+    if(next&&next.channel!=='webhook'){var chan=next.channel}else{var chan=config.channelID}
+    nowTimestamp=new Date().getTime();sent=false
+    if(dialogs.queue!==null){
+      delay=nowTimestamp-dialogs.queue.timestamp
+      if(dialogs.queue.channel.id!==next.channel){
+        // dialogs.queue.delete().catch((err)=>{}).then(()=>{dialogs.queue=null})
+      }else if((delay)>90000){
+        dialogs.queue.delete().catch((err)=>{}).then(()=>{dialogs.queue=null})
+      }else if(progressUpdate['totalSteps']===0){
+        // dialogs.queue.delete().catch((err)=>{}).then(()=>{dialogs.queue=null})
+        debugLog('totalsteps=0')
+        sent=true
+      }else{
+        if(intermediateImage!==null){
+          var previewImg=new Buffer.from(intermediateImage.url.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+          enlargePreview(previewImg)
+          if(intermediateImageZoom!==null){
+            statusObj.file={file:intermediateImageZoom,contentType:'image/png',name:next.id+'.png'}
+          }
+        }
+        if(delay>=500){
+          dialogs.queue.edit(statusObj).then(x=>{dialogs.queue=x;sent=true}).catch((err)=>debugLog(err));sent=true
+        }else{sent=true}
+      }
+    }
+    if(sent===false){bot.createMessage(chan,statusMsg).then(x=>{dialogs.queue=x}).catch((err)=>debugLog(err))}
   }
-  if(next&&next.channel!=='webhook'){var chan=next.channel} else {var chan=config.channelID}
-  bot.createMessage(chan,statusMsg).then(x=>{dialogs.queue=x}).catch((err)=>console.error(err))
 }
-queueStatus=debounce(queueStatus,2000,true)
+queueStatus=debounce(queueStatus,1500)//,true
+
+function enlargePreview(oldimgbuffer){
+  jimp.read(oldimgbuffer).then(img=>{
+    //img.resize(img.bitmap.width*4,img.bitmap.height*4)
+    img.scale(4, jimp.RESIZE_BILINEAR)
+    img.getBufferAsync(img.getMIME()).then(img=>{intermediateImageZoom=img})
+  })
+}
 function closestRes(n){ // diffusion needs a resolution as a multiple of 64 pixels, find the closest
     var q, n1, n2; var m=64
     q=n/m
@@ -308,15 +354,14 @@ function closestRes(n){ // diffusion needs a resolution as a multiple of 64 pixe
 }
 function prepSlashCmd(options) { // Turn partial options into full command for slash commands, hate the redundant code here
   var job={}
-  var defaults=[{ name: 'prompt', value: ''},{name: 'width', value: defaultSize},{name:'height',value:defaultSize},{name:'steps',value:defaultSteps},{name:'scale',value:defaultScale},{name:'sampler',value:defaultSampler},{name:'seed', value: getRandomSeed()},{name:'strength',value:0.75},{name:'number',value:1},{name:'gfpgan_strength',value:0},{name:'codeformer_strength',value:0},{name:'upscale_strength',value:0.75},{name:'upscale_level',value:''},{name:'seamless',value:false},{name:'variation_amount',value:0},{name:'with_variations',value:[]},{name:'threshold',value:0},{name:'perlin',value:0},{name:'hires_fix',value:false},{name:'model',value:defaultModel}]
+  var defaults=[{ name: 'prompt', value: ''},{name: 'width', value: defaultSize},{name:'height',value:defaultSize},{name:'steps',value:defaultSteps},{name:'scale',value:defaultScale},{name:'sampler',value:defaultSampler},{name:'seed', value: getRandomSeed()},{name:'strength',value:0.75},{name:'number',value:1},{name:'gfpgan_strength',value:0},{name:'codeformer_strength',value:0},{name:'upscale_strength',value:0.5},{name:'upscale_level',value:''},{name:'seamless',value:false},{name:'variation_amount',value:0},{name:'with_variations',value:[]},{name:'threshold',value:0},{name:'perlin',value:0},{name:'hires_fix',value:false},{name:'model',value:defaultModel}]
   defaults.forEach(d=>{if(options.find(o=>{if(o.name===d.name){return true}else{return false}})){job[d.name]=options.find(o=>{if(o.name===d.name){return true}else{return false}}).value}else{job[d.name]=d.value}})
   return job
 }
-function getCmd(newJob){ 
-  // Apply mask for redream, TODO: simplify?
+
+function getCmd(newJob){
   var cmd = newJob.prompt+' --width ' + newJob.width + ' --height ' + newJob.height + ' --seed ' + newJob.seed + ' --scale ' + newJob.scale + ' --sampler ' + newJob.sampler + ' --steps ' + newJob.steps + ' --strength ' + newJob.strength + ' --n ' + newJob.number + ' --gfpgan_strength ' + newJob.gfpgan_strength + ' --codeformer_strength ' + newJob.codeformer_strength + ' --upscale_level ' + newJob.upscale_level + ' --upscale_strength ' + newJob.upscale_strength + ' --threshold ' + newJob.threshold + ' --perlin ' + newJob.perlin + ' --seamless ' + newJob.seamless + ' --hires_fix ' + newJob.hires_fix + ' --variation_amount ' + newJob.variation_amount + ' --with_variations ' + newJob.with_variations + ' --model ' + newJob.model
-  if (newJob.text_mask)
-    cmd += ' --text_mask ' + newJob.text_mask
+  if(newJob.text_mask){cmd+=' --text_mask '+newJob.text_mask}
   return cmd
 }
 function getRandomSeed(){return Math.floor(Math.random()*4294967295)}
@@ -359,10 +404,11 @@ function userCreditCheck(userID,amount) { // Check if a user can afford a specif
 }
 function costCalculator(job) {                 // Pass in a render, get a cost in credits
   var cost=1                                   // a normal render base cost, 512x512 50 steps
-  var pixelBase=262144                         // 512x512 reference pixel size
+  //var pixelBase=262144                         // 512x512 reference pixel size
+  var pixelBase=defaultSize*defaultSize        // reference pixel size
   var pixels=job.width*job.height              // How many pixels does this render use?
   cost=(pixels/pixelBase)*cost                 // premium or discount for resolution relative to default
-  cost=(job.steps/50)*cost                     // premium or discount for step count relative to default
+  cost=(job.steps/defaultSteps)*cost           // premium or discount for step count relative to default
   if (job.gfpgan_strength!==0){cost=cost*1.05} // 5% charge for gfpgan face fixing (minor increased processing time)
   if (job.codeformer_strength!==0){cost=cost*1.05} // 5% charge for gfpgan face fixing (minor increased processing time)
   if (job.upscale_level===2){cost=cost*1.5}    // 1.5x charge for upscale 2x (increased processing+storage+bandwidth)
@@ -509,7 +555,7 @@ function rechargePrompt(userid,channel){
   var paymentLinkHbd='https://hivesigner.com/sign/transfer?to='+config.hivePaymentAddress+'&amount=1.000%20HBD&memo='+paymentMemo
   var paymentLinkHive='https://hivesigner.com/sign/transfer?to='+config.hivePaymentAddress+'&amount=1.000%20HIVE&memo='+paymentMemo
   var lightningInvoiceQr=getLightningInvoiceQr(paymentMemo)
-  var paymentMsg='<@'+userid+'> has :coin:`'+creditsRemaining(userid)+'` left\n\n*Recharging costs `1` usd per :coin:`100` *\nSend HBD or HIVE to `'+config.hivePaymentAddress+'` with the memo `'+paymentMemo+'`\n**Pay $1 with Hbd:** '+paymentLinkHbd+'\n**Pay $1 with Hive:** '+paymentLinkHive
+  var paymentMsg='<@'+userid+'> has :coin:`'+creditsRemaining(userid)+'` left\n\n*Recharging costs `1` usd per :coin:`500` *\nSend HBD or HIVE to `'+config.hivePaymentAddress+'` with the memo `'+paymentMemo+'`\n**Pay $1 with Hbd:** '+paymentLinkHbd+'\n**Pay $1 with Hive:** '+paymentLinkHive
   var freeRechargeMsg='..Or just wait for your free recharge of 10 credits twice a day'
   var paymentMsgObject={content: paymentMsg,embeds:[{description:'Pay $1 via btc lightning network', image:{url:lightningInvoiceQr}}]}
   if (creditsRemaining(userid)<10){paymentMsgObject.embeds.push({footer:{text:freeRechargeMsg}})}
@@ -535,7 +581,7 @@ function checkNewPayments(){
           if(pastPayment===undefined){
             coin=op.amount.split(' ')[1]
             amount=parseFloat(op.amount.split(' ')[0])
-            if(coin==='HBD'){amountCredit=amount*100}else if(coin==='HIVE'){amountCredit=(amount*hiveUsd)*100}
+            if(coin==='HBD'){amountCredit=amount*500}else if(coin==='HIVE'){amountCredit=(amount*hiveUsd)*500}
             log('New Payment: amount credit:'.bgBrightGreen.red+amountCredit+' , amount:'+op.amount)
             creditRecharge(amountCredit,tx.trx_id,accountId,op.amount,op.from)
           }
@@ -582,10 +628,14 @@ function generationResult(data){
     }
   }catch(err){log(err)}*/
 
-  // Prune out the attention map or it bloats our queue with image data
-  data.attentionMaps = null;
-  if(job){job.results.push(data);var postRenderObject={id:job.id,filename: url, seed: data.metadata.image.seed, resultNumber:job.results.length-1, width:data.metadata.image.width,height:data.metadata.image.height};postRender(postRenderObject)}else{rendering=false}
-    if (job && job.results.length >= job.number) { job.status = 'done'; debugLog(job); dbWrite(); rendering=false;processQueue()}
+  if(job){
+    var postRenderObject={id:job.id,filename: url, seed: data.metadata.image.seed, resultNumber:job.results.length-1, width:data.metadata.image.width,height:data.metadata.image.height}
+    // remove redundant data before pushing to db results
+    delete (data.metadata.prompt);delete (data.metadata.seed);delete (data.metadata.model_list);delete (data.metadata.app_id);delete (data.metadata.app_version); delete (data.attentionMaps)
+    job.results.push(data)
+    postRender(postRenderObject)
+  }else{rendering=false}
+  if(job&&job.results.length>=job.number){job.status='done';debugLog(job);dbWrite();rendering=false;processQueue()}
 }
 function initialImageUploaded(data){
   debugLog("initialImageUploaded")
@@ -618,7 +668,7 @@ async function emitRenderApi(job){
       "variation_amount": job.variation_amount,
       "strength": job.strength,
       "fit": true,
-      "progress_latents": false,
+      "progress_latents": true,
       "generation_mode": 'txt2img'
   }
   if(job.text_mask){
@@ -650,7 +700,6 @@ async function addRenderApi(id){
   var job=queue[queue.findIndex(x=>x.id===id)]
   var initimg=null
   job.status='rendering'
-  queueStatus()
   if(job.attachments[0]&&job.attachments[0].content_type&&job.attachments[0].content_type.startsWith('image')){
     log('fetching attachment from '.bgRed + job.attachments[0].proxy_url)
     await axios.get(job.attachments[0].proxy_url,{responseType: 'arraybuffer'})
@@ -659,53 +708,28 @@ async function addRenderApi(id){
   }
   if (initimg!==null){
     debugLog('uploadInitialImage')
-    //// Rework due to issues on windows side, and skip pointless disk writing since we already have in memory (also avoids desync, shipping older attach.png instead of current one)
-    //let writer=await fs.createWriteStream('attach.png').write(initimg)
-    //let reader=fs.readFileSync('attach.png')
-    ////let reader=fs.createReadStream('attach.png')
-    //initimg=reader
-    let form = new FormData()    
 
-    form.append("data", JSON.stringify({kind:'init'}))//, {contentType:"application/json"})    
-    //form.append("file",initimg,job.id+'.png')
-    debugLog("going " + job.id+'.png')
-    form.append("file",initimg,
-       {
-         contentType: 'image/png',
-         filename: job.id+'.png',
-         //knownLength: fs.statSync('attach.png').size,
-       });
-    
-    //debugLog(form)
-    debugLog(form.getHeaders())
-
+    let form = new FormData()
+    form.append("data",JSON.stringify({kind:'init'}))
+    form.append("file",initimg,{contentType:'image/png',filename:job.id+'.png'})
     function getHeaders(form) {
       return new Promise((resolve, reject) => {
           form.getLength((err, length) => {
-              if(err) { reject(err); }
-              let headers = Object.assign({'Content-Length': length}, form.getHeaders());
-              resolve(headers);
-           });
-      });
-    }
-    getHeaders(form).then((headers) => {
-        return axios.post(config.apiUrl+'/upload', form, {headers:headers})
-    }).then((response)=>{
-          debugLog("initimg")
-          debugLog(response.data.url)
-
-        var filename=config.basePath+response.data.url.replace('outputs/',''); //.replace('/', '\\\\')
-        //var filename=config.basePath+"/"+response.data.url.replace('outputs/','')
-        debugLog(filename)
-        job.init_img=filename
-        job.initimg=null
-        emitRenderApi(job)
+              if(err) { reject(err) }
+              let headers = Object.assign({'Content-Length': length}, form.getHeaders())
+              resolve(headers)
+           })
       })
-    .catch((error) => console.error(error))
-
-        //axios({method:'post',url:config.apiUrl+'/upload',data:form,'maxContentLength': Infinity,'maxBodyLength': Infinity,headers:{...form.getHeaders()}})
-    //axios.post(config.apiUrl+'/upload',form,{headers:{...form.getHeaders()}})
-    //axios.post(config.apiUrl+'/upload',form,{headers:form.getHeaders()})
+    }
+    getHeaders(form).then((headers)=>{
+      return axios.post(config.apiUrl+'/upload',form, {headers:headers})
+    }).then((response)=>{
+      debugLog('initimg: '+response.data.url)
+      var filename=config.basePath+"/"+response.data.url.replace('outputs/','')
+      job.init_img=filename
+      job.initimg=null
+      emitRenderApi(job)
+    }).catch((error) => console.error(error))
   }else{
     emitRenderApi(job)
   }
@@ -801,8 +825,7 @@ function processQueue(){
       bot.editStatus('online')
       rendering=true
       log(nextJob.username.bgWhite.red+':'+nextJob.cmd.replace('\r','').replace('\n').bgWhite.black)
-      //pedoScan(nextJob.id) // Scan for pedo prompts,reject,alert OR render it
-      addRenderApi(nextJob.id) // Comment out line if enabling pedoscan above
+      addRenderApi(nextJob.id)
     }else{
       log(nextJob.username+' cant afford this render, denying')
       log('cost: '+costCalculator(nextJob))
@@ -842,58 +865,6 @@ function lexicaSearch(query,channel){
 }
 lexicaSearch=debounce(lexicaSearch,1000,true)
 
-function pedoScan(jobid){
-  debugLog('start pedoscan')
-  // Call in between processQueue and render emit
-  // Detect likely p*do prompts, set job status to failed, reply with chris hansen behind spoiler, alert admin with user info, prompt with matching terms and discord ID to manually ban via .env
-  var chrisHansen='||https://media.discordapp.net/attachments/1024766656347652186/1036541751147638854/unknown.png *Why don\'t you take a seat right over here*...\n(**Prompt rejected**)||'
-  // Fuck discord id miami#7199 986810579991818261 ..
-  var job=queue[jobid-1]
-  if (job){
-    debugLog('pedoScan job found')
-    var prompt=job.prompt
-    var ageKeywords=['baby','toddler','infant','prepubescent','child','kid','young','TESTAGEKEYWORD'] // suss when combined with pornKeywords
-    var ageNumbers=['one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','TESTAGENUMBER'] // suss when combined with ageYearTerms AND pornKeywords
-    var ageYearTerms=['yr','year','yo','TESTAGEYEARTERM']
-    var pornKeywords=['nude','naked','sex','porn','fucking','fuck','gape','gangbang','cumshot','cum','lolita','rape','TESTPORNKEYWORD']
-    var promptMatches=[]
-    var possibleCombos=[]
-    if (['f111'].includes(job.model)){
-      if (ageKeywords.some(k=>prompt.includes(k))){ // no young keywords + porn models
-        promptMatches.push(job.model)
-        promptMatches.push(k) // BUGGED k is not defined)
-      }
-    }
-    if(pornKeywords.some(p=>prompt.includes(p))){// Matched a porn keyword in the prompt
-      if (ageKeywords.some(k=>prompt.includes(k))){// AND matched a child keyword
-        // BUGGED k is not defined
-        promptMatches.push(k);promptMatches.push(p)
-      }
-      if (ageNumbers.some(a=>prompt.includes(a))){ // Matching porn AND ageNumber
-        ageYearTerms.forEach((y)=>{ // Make sure ageNumber is neighbouring the ageYearTerm
-          // BUGGED a is not defined
-          possibleCombos.push(a+y);possibleCombos.push(a+' '+y)
-          if(possibleCombos.some(pc=>prompt.includes(pc))){promptMatches.push(pc);promptMatches.push(p)}
-          possibleCombos=[]
-        })
-      }
-    }
-    if(promptMatches.length>0){//any matches is too many, reject/alert
-      log('failed pedoScan')
-      job.status='rejected'
-      sayChan(job.channel,'<'+job.userid+'>'+chrisHansen)
-      var alertMsg='Flagged prompts by '+job.username+'#'+job.discriminator+' userid '+job.userid+' channelid '+job.channel+'\nMatching terms:'+promptMatches.join(',')+'\nFull prompt:'+job.prompt
-      log(alertMsg)
-      directMessageUser(config.adminID,alertMsg,config.channelID)
-      rendering=false;processQueue()
-    } else {
-      debugLog('passed pedoScan')
-      addRenderApi(jobid)
-    }
-  } else {
-    log('pedoScan job not found')
-  }
-}
 async function meme(prompt,urls,userid,channel){
   debugLog("meme")
   debugLog(prompt)
@@ -911,21 +882,21 @@ async function meme(prompt,urls,userid,channel){
     case 'greyscale': var img = await new DIG.Greyscale().getImage(urls[0]);break
     case 'invert': var img = await new DIG.Invert().getImage(urls[0]);break
     case 'sepia': var img = await new DIG.Sepia().getImage(urls[0]);break
-    case 'animate':
-    // TODO: Make a separate command
-    case 'blink': 
-    {      
+    case 'animateseed':{
       debugLog('l:' + queue.filter((j)=>j.seed==params[1]).length)
-      let urlseed = []
+      let urlseed=[]      
       // For animating a seed, the image replied to is the stopping mark
       // So collect every image url for seed until we reach that end point
       var donemark = false; // did we hit the last frame
       var stopUrl = null; // image url that is our last frame to animate
       if (urls && urls.length > 0) { stopUrl = urls[0].split('/')[urls[0].split('/').length-1]; }
       
+      // NOTE: My version doesn't filter on userid because intent is collaborative (take turns modding prompts, animate result)
+      // TODO: Add limits and maybe date range, so this doesn't try animating 1000 images
+      //queue.filter((j)=>j.seed==params[1]&&j.userid===userid).forEach((j)=>{j.results.forEach((r)=>{urlseed.push(config.basePath+r.url.replace('outputs/',''))})})
       queue.filter((j)=>j.seed==params[1]).forEach((j) => {
         j.results.forEach((r) => {        
-          if (donemark) {debugLog('SKIP');return;}
+          if (donemark) {return;}
           fileOnly = r.url.replace('outputs/','');
           if (stopUrl == fileOnly) {donemark=true;}
 
@@ -933,24 +904,21 @@ async function meme(prompt,urls,userid,channel){
           urlseed.push(seedUrl)
         })
       })
+      
       debugLog(urls)
-      debugLog(urlseed)
-//var filename=config.basePath+response.data.url.replace('outputs/','').replace('/', '\\\\')
+      debugLog(urlseed)      
+      
+      if (urlseed.length>1){var img = await new DIG.Blink().getImage(...urlseed)}
+    }
+    case 'animate':
 
-//      var gimmages =["S:\\discordiff\\InvokeAI\\invokeai\\out\\001597.20dcd820.1126973224.png",
-//        "S:\\discordiff\\InvokeAI\\invokeai\\out\\001596.08abe673.4124951696.png"];
-//      debugLog(gimmages)
-//      var img = await new DIG.Blink().getImage(1000, ...gimmages)
-
-      if (urls.length>1)
-      {
+    case 'blink': {
+      if (urls.length>1){
         var img = await new DIG.Blink().getImage(...urls)
       }
-      else if (urlseed.length > 1)
-      {
-        var img = await new DIG.Blink().getImage(1000, ...urlseed)
-      }
-    ;break} // Can take up to 10 images (discord limit) and make animations
+      break
+      } // Can take up to 10 images (discord limit) and make animations
+
     case 'triggered': var img = await new DIG.Triggered().getImage(urls[0]);break
     case 'ad': var img = await new DIG.Ad().getImage(urls[0]);break
     case 'affect': var img = await new DIG.Affect().getImage(urls[0]);break
@@ -998,7 +966,19 @@ function shuffle(array) {for (let i = array.length - 1; i > 0; i--) {let j = Mat
 const unique = (value, index, self) => { return self.indexOf(value) === index }
 function getRandomColorDec(){return Math.floor(Math.random()*16777215)}
 function timeDiff(date1,date2) { return date2.diff(date1, 'seconds') }
-function getRandom(what){if(randoms.includes(what)){try{var lines=fs.readFileSync('txt/'+what+'.txt','utf-8').split(/r?\n/);return lines[Math.floor(Math.random()*lines.length)]}catch(err){console.error(err)}}else{return what}}
+function getRandom(what){
+  if(randoms.includes(what)){
+    try{
+      var lines=fs.readFileSync('txt/'+what+'.txt','utf-8').split(/r?\n/);
+      return lines[Math.floor(Math.random()*lines.length)]
+    }catch(err){
+      console.error(err)
+    }
+  }else{
+    debugLog('Randomiser ' +what+ ' not found')
+    return what
+  }
+  }
 function replaceRandoms(input){
   var output=input
   randoms.forEach(x=>{
@@ -1105,15 +1085,14 @@ bot.on("interactionCreate", async (interaction) => {
           newJob.upscale_level = 2
           newJob.seed = interaction.data.custom_id.split('-')[2]
           newJob.variation_amount=0
-        } 
-        else if (interaction.data.custom_id.startsWith('refreshEdit-')){
 
+        } else if (interaction.data.custom_id.startsWith('refreshEdit-')){
           newJob.prompt=interaction.data.components[0].components[0].value
-        }
-        else { // Only a normal refresh should change the seed
+        } else { // Only a normal refresh should change the seed
           newJob.variation_amount=0
           newJob.seed=getRandomSeed()
         }
+        //if (interaction.data.custom_id.startsWith('refreshEdit-')){newJob.prompt=interaction.data.components[0].components[0].value}
         request({cmd: getCmd(newJob), userid: interaction.member.user.id, username: interaction.member.user.username, discriminator: interaction.member.user.discriminator, bot: interaction.member.user.bot, channelid: interaction.channel.id, attachments: newJob.attachments})
         if (interaction.data.custom_id.startsWith('refreshEdit-')){return interaction.editParent({}).catch((e)=>{console.error(e)})}else{return interaction.editParent({}).catch((e)=>{console.error(e)})}
       } else {
@@ -1163,8 +1142,8 @@ bot.on("interactionCreate", async (interaction) => {
               {type:Constants.ComponentTypes.ACTION_ROW,components:[
                 {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.SECONDARY, label: "Scale - 1", custom_id: "twkscaleMinus-"+id+'-'+rn, emoji: { name: '⚖️', id: null}, disabled: false },
                 {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.SECONDARY, label: "Scale + 1", custom_id: "twkscalePlus-"+id+'-'+rn, emoji: { name: '⚖️', id: null}, disabled: false },
-                {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.SECONDARY, label: "Steps - 5", custom_id: "twkstepsMinus-"+id+'-'+rn, emoji: { name: '♻️', id: null}, disabled: false },
-                {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.SECONDARY, label: "Steps + 5", custom_id: "twkstepsPlus-"+id+'-'+rn, emoji: { name: '♻️', id: null}, disabled: false }
+                {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.SECONDARY, label: "Steps - 10", custom_id: "twkstepsMinus-"+id+'-'+rn, emoji: { name: '♻️', id: null}, disabled: false },
+                {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.SECONDARY, label: "Steps + 10", custom_id: "twkstepsPlus-"+id+'-'+rn, emoji: { name: '♻️', id: null}, disabled: false }
               ]},
               {type:Constants.ComponentTypes.ACTION_ROW,components:[
                 {type: Constants.ComponentTypes.BUTTON, style: Constants.ButtonStyles.DANGER, label: "Upscale 2x", custom_id: "twkupscale2-"+id+'-'+rn, emoji: { name: '🔍', id: null}, disabled: false },
@@ -1189,13 +1168,15 @@ bot.on("interactionCreate", async (interaction) => {
             ]
           }
           // Disable buttons depending on the current parameters
-          if (newJob.width===512&&newJob.height===704){tweakResponse.components[0].components[0].disabled=true}
+          //if (newJob.width===512&&newJob.height===704){tweakResponse.components[0].components[0].disabled=true}
+          if (newJob.width===defaultSize&&newJob.height===(defaultSize+192)){tweakResponse.components[0].components[0].disabled=true}
           if (newJob.width===newJob.height){tweakResponse.components[0].components[1].disabled=true}
-          if (newJob.width===704&&newJob.height===512){tweakResponse.components[0].components[2].disabled=true}
+          //if (newJob.width===704&&newJob.height===512){tweakResponse.components[0].components[2].disabled=true}
+          if (newJob.height===defaultSize&&newJob.width===(defaultSize+192)){tweakResponse.components[0].components[2].disabled=true}
           if (newJob.scale<=1){tweakResponse.components[1].components[0].disabled=true}
           if (newJob.scale>=30){tweakResponse.components[1].components[1].disabled=true}
           if (newJob.steps<=5){tweakResponse.components[1].components[2].disabled=true}
-          if (newJob.steps>=145){tweakResponse.components[1].components[3].disabled=true}
+          if (newJob.steps>=140){tweakResponse.components[1].components[3].disabled=true}
           if (newJob.upscale_level!==0&&newJob.upscale_level!==''){tweakResponse.components[2].components[0].disabled=true;tweakResponse.components[2].components[1].disabled=true}
           if (newJob.gfpgan_strength!==0){tweakResponse.components[2].components[2].disabled=true}
           if (newJob.codeformer_strength!==0){tweakResponse.components[2].components[3].disabled=true}
@@ -1221,12 +1202,12 @@ bot.on("interactionCreate", async (interaction) => {
       var newCmd=''
       var postProcess=false
       switch(interaction.data.custom_id.split('-')[0].replace('twk','')){
-        case 'scalePlus': newJob.scale=newJob.scale+1;break
-        case 'scaleMinus': newJob.scale=newJob.scale-1;break
-        case 'stepsPlus': newJob.steps=newJob.steps+5;break
-        case 'stepsMinus': newJob.steps=newJob.steps-5;break
-        case 'aspectPortrait': newJob.height=704;newJob.width=512;break
-        case 'aspectLandscape': newJob.width=704;newJob.height=512;break
+        case 'scalePlus': newJob.scale=newJob.scale+5;break
+        case 'scaleMinus': newJob.scale=newJob.scale-5;break
+        case 'stepsPlus': newJob.steps=newJob.steps+10;break
+        case 'stepsMinus': newJob.steps=newJob.steps-10;break
+        case 'aspectPortrait': newJob.height=defaultSize+192;newJob.width=defaultSize;break
+        case 'aspectLandscape': newJob.width=defaultSize+192;newJob.height=defaultSize;break
         case 'aspectSquare': newJob.width=defaultSize;newJob.height=defaultSize;break
         case 'aspect4k': newJob.width=960;newJob.height=512;newJob.upscale_level=4;newJob.hires_fix=true;break
         case 'upscale2': newJob.upscale_level=2;break // currently resubmitting jobs, update to use postprocess once working
@@ -1242,8 +1223,8 @@ bot.on("interactionCreate", async (interaction) => {
         case 'gfpgan': newJob.gfpgan_strength=0.8;newJob.codeformer_strength=0;break //
         case 'codeformer': newJob.codeformer_strength=0.8;newJob.gfpgan_strength=0;break //
         case 'default': newCmd=newJob.prompt;break
-        case 'fast': newJob.sampler='k_euler_a';newJob.steps=25;break
-        case 'slow': newJob.sampler='k_euler_a';newJob.steps=100;break
+        case 'fast': newJob.steps=20;break
+        case 'slow': newJob.steps=50;break
         case 'batch5': newJob.seed=getRandomSeed();newJob.number=5;break
       }
       if (postProcess){ // submit as postProcess request
@@ -1346,25 +1327,13 @@ async function directMessageUser(id,msg,channel){ // try, fallback to channel
     if (channel&&channel.length>0){bot.createMessage(channel,msg).then(()=>{log('DM sent to '.dim+id)}).catch(() => log('failed to both dm a user or message in channel'.bgRed.white))}
   })
 }
-bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
-  debugLog("messageReactionAdd")
-  if (msg.author) 
-  {
-    targetUserId = reactor.user.id
-  }
-  else {
-    debugLog("FETCHING MESSAGE")
-    debugLog(reactor)
-    msg = await bot.getMessage(msg.channel.id, msg.id)
-    targetUserId = reactor.id
-  }
 
-   // TODO: Maybe sometimes targetUserId can come from other pathway despite msg being skinny?
+bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
+  if (msg.author){targetUserId=reactor.user.id}else{msg=await bot.getMessage(msg.channel.id,msg.id);targetUserId=reactor.id}
+
   var embeds=false
   if (msg.embeds){embeds=dJSON.parse(JSON.stringify(msg.embeds))}
   if (embeds&&msg.attachments&&msg.attachments.length>0) {embeds.unshift({image:{url:msg.attachments[0].url}})}
-  //if (!reactor.user){log('DEBUG reactor.user.id not found, find its replacement here'.bgRed); log(reactor)}
-  //if (!msg.author){log('DEBUG msg.author.id not found, find its replacement here'.bgRed); log(msg)}
   if (msg.author&&msg.author.id===bot.application.id){
     switch(emoji.name){
       case '😂':
@@ -1373,10 +1342,10 @@ bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
       case '❤️': 
       {
         // TODO: Add recording of favorites
-      	log('Positive emojis'.green+emoji.name);
-      	
+      	log('Positive emojis'.green+emoji.name);      	
       	break
       }
+
       case '✉️': log('sending image to dm'.dim);directMessageUser(targetUserId,{content: msg.content, embeds: embeds});break // todo debug occasional error about reactor.user.id undefined here
       case '👎':
       case '⚠️':
@@ -1480,6 +1449,7 @@ bot.on("messageCreate", (msg) => {
   var c=msg.content.split(' ')[0]
   if (msg.author.id!==bot.id&&authorised(msg,msg.channel.id,msg.guildID,)){ // Work anywhere its authorized // (msg.channel.id===config.channelID||!msg.guildID) // interaction.member,interaction.channel.id,interaction.guildID
     switch(c){
+      case '!help':{bot.createMessage(msg.channel.id,'To create art type `!dream your idea here`\nSee these links for more info:\nhttps://peakd.com/@ausbitbank/our-new-stable-diffusion-discord-bot\nhttps://github.com/ausbitbank/stable-diffusion-discord-bot');break}
       case '!dream':{request({cmd: msg.content.substr(7, msg.content.length), userid: msg.author.id, username: msg.author.username, discriminator: msg.author.discriminator, bot: msg.author.bot, channelid: msg.channel.id, attachments: msg.attachments});break}
       case '!prompt':
       case '!random':{request({cmd: msg.content.substr(8,msg.content.length)+getRandom('prompt'), userid: msg.author.id, username: msg.author.username, discriminator: msg.author.discriminator, bot: msg.author.bot, channelid: msg.channel.id, attachments: msg.attachments});break}
@@ -1487,27 +1457,25 @@ bot.on("messageCreate", (msg) => {
       case '!lexica':lexicaSearch(msg.content.substr(8, msg.content.length),msg.channel.id);break
       case '!meme':
       {
-        if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/'))
+        // TODO: Think lisa's urls are undefined? check after merge
+        if (msg.content.startsWith('!meme lisapresentation'))
+        {meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)}
+        
+        // Supply urls attached to our message
+        else if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/'))
         {
             meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
         } 
-        else if (msg.content.startsWith('!meme lisapresentation'))
-        {
-            meme(msg.content.substr(6, msg.content.length),urls,msg.author.id,msg.channel.id)
-        }
+        // Supply image url of what we replied to
         else if (msg.referencedMessage)
         {
-            debugLog(msg.referencedMessage.attachments)
-            msg.attachments=msg.referencedMessage.attachments
-            meme(msg.content.substr(6, msg.content.length),msg.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
+            meme(msg.content.substr(6, msg.content.length),msg.referencedMessage.attachments.map((u)=>{return u.proxy_url}),msg.author.id,msg.channel.id)
         }
-        else
-        {
-          debugLog("Nothing to work with for meme")
-        }
+        else {debugLog("Nothing to work with for meme")}
         break;
         
       }
+
       case '!avatar':{var avatars='';msg.mentions.forEach((m)=>{avatars+=m.avatarURL.replace('size=128','size=512')+'\n'});bot.createMessage(msg.channel.id,avatars);break}
       case '!background':{ // requires docker run -p 127.0.0.1:5000:5000 danielgatis/rembg s
         if (msg.attachments.length>0&&msg.attachments[0].content_type.startsWith('image/')){
@@ -1687,6 +1655,22 @@ bot.on("messageCreate", (msg) => {
         }
         break
       }
+      case '!imgdiff':{
+        if (msg.attachments.length===2&&msg.attachments[0].content_type.startsWith('image/')&&msg.attachments[1].content_type.startsWith('image/')){
+          var attachmentsUrls = msg.attachments.map((u)=>{return u.proxy_url})
+          jimp.read(attachmentsUrls[0], (err,img1)=>{
+            jimp.read(attachmentsUrls[1], (err,img2)=>{
+              var distance = jimp.distance(img1,img2)
+              var diff = jimp.diff(img1,img2)
+              var newMsg = 'Image 1 hash: `'+img1.hash()+'`\nImage 2 hash: `'+img2.hash()+'`\nHash Distance: `'+distance+'`\nImage Difference: `'+diff.percent*100+' %`'
+              diff.image.getBuffer(jimp.MIME_PNG, (err,buffer)=>{
+                if(err){debugLog(err)}
+                try{bot.createMessage(msg.channel.id, newMsg, {file: buffer, name: 'imgdiff.png'})}catch(err){debugLog(err)}
+              })
+            })
+          })
+      }
+      break
     }
   }
   if (msg.author.id===config.adminID) { // admins only
@@ -1696,8 +1680,8 @@ bot.on("messageCreate", (msg) => {
       case '!wipequeue':{rendering=false;queue=[];dbWrite();log('admin wiped queue');break}
       case '!queue':{queueStatus();break}
       case '!cancel':{cancelRenders();break}
-      case '!pause':{chat(':pause_button: Bot is paused, requests will still be accepted and queued for when I return');paused=true;rendering=true;break}
-      case '!resume':{socket.emit('requestSystemConfig');paused=false;rendering=false;chat(':play_pause: Bot is back online');processQueue();break}
+      case '!pause':{bot.editStatus('dnd');paused=true;rendering=true;chat(':pause_button: Bot is paused, requests will still be accepted and queued for when I return');break}
+      case '!resume':{socket.emit('requestSystemConfig');paused=false;rendering=false;bot.editStatus('online');chat(':play_pause: Bot is back online');processQueue();break}
       case '!richlist':{getRichList();break}
       case '!checkpayments':{checkNewPayments();break}
       case '!restart':{log('Admin restarted bot'.bgRed.white);exit(0)}
@@ -1723,7 +1707,11 @@ bot.on("messageCreate", (msg) => {
         }
         break
       }
-      case '!guilds':{bot.guilds.forEach((g)=>{log({id: g.id, name: g.name, ownerID: g.ownerID, description: g.description, memberCount: g.memberCount})});log('channelGuildMap');log(bot.channelGuildMap);log('threadguiltmap');log(bot.threadGuildMap);log('privateChannelMap');log(bot.privateChannelMap);break}
+      case '!guilds':{
+        debugLog('Guild count: '+bot.guilds.size)
+        bot.guilds.forEach((g)=>{log({id: g.id, name: g.name, ownerID: g.ownerID, description: g.description, memberCount: g.memberCount})})
+        break
+      }
       case '!leaveguild':{bot.leaveGuild(msg.content.split(' ')[1]);break}
       case '!getmessages':{var cid=msg.content.split(' ')[1];if(cid){bot.getMessages(cid).then(x=>{x.reverse();x.forEach((y)=>{log(y.author.username.bgBlue+': '+y.content);y.attachments.map((u)=>{return u.proxy_url}).forEach((a)=>{log(a)})})})};break}
       case '!updateslashcommands':{bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
@@ -1768,9 +1756,14 @@ bot.on("messageCreate", (msg) => {
         try{chatChan(msg.channel.id,newMsg)}catch(err){log(err)}
         break
       }
+      case '!schedule':{
+        if (msg.content.split(' ')[1]==='on'){dbScheduleRead()}
+        if (msg.content.split(' ')[1]==='off'){dbScheduleRead()}
+        break
+      }
     }
   }
-})
+}})
 
 // Socket listeners for invokeai backend api
 //socket.on("connect", (socket) => {log(socket)})
@@ -1780,7 +1773,20 @@ socket.on("initialImageUploaded", (data) => {debugLog('got init image uploaded')
 socket.on("imageUploaded", (data) => {debugLog('got image uploaded');initialImageUploaded(data)})
 socket.on("systemConfig", (data) => {debugLog('systemConfig received');currentModel=data.model_weights;models=data.model_list})
 socket.on("modelChanged", (data) => {currentModel=data.model_name;models=data.model_list;debugLog('modelChanged to '+currentModel)})
-//socket.on("progressUpdate", (data) => {})
+var progressUpdate = {currentStep: 0,totalSteps: 0,currentIteration: 0,totalIterations: 0,currentStatus: 'Initializing',isProcessing: false,currentStatusHasSteps: true,hasError: false}
+socket.on("progressUpdate", (data) => {
+  progressUpdate=data
+  if(['Processing Complete'].includes(data['currentStatus'])){
+    if(dialogs.queue!==null){dialogs.queue.delete().catch((err)=>{debugLog(err)}).then(()=>{dialogs.queue=null;intermediateImage=null;intermediateImageZoom=null})}
+  }
+  queueStatus()
+})
+var intermediateImage=null
+var intermediateImageZoom=null
+socket.on("intermediateResult", (data) => {
+  intermediateImage=data
+  queueStatus()
+})
 socket.on('error', (error) => {
   log('Api socket error'.bgRed);log(error)
   var nowJob=queue[queue.findIndex((j)=>j.status==="rendering")]
