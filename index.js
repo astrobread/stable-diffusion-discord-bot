@@ -909,6 +909,7 @@ async function meme(prompt,urls,userid,channel){
       debugLog(urlseed)      
       
       if (urlseed.length>1){var img = await new DIG.Blink().getImage(...urlseed)}
+      break
     }
     case 'animate':
 
