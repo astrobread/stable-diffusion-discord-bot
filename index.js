@@ -957,7 +957,7 @@ async function meme(prompt,urls,userid,channel){
       chargeCredits(userid,0.05)
       msg+=', it cost :coin:`0.05`/`'+creditsRemaining(userid)+'`'
     }
-    var extension = ['blink','triggered','animate'].includes(cmd) ? '.gif' : '.png'
+    var extension = ['blink','triggered','animate', 'animateseed'].includes(cmd) ? '.gif' : '.png'
     bot.createMessage(channel, msg, {file: img, name: cmd+'-'+getRandomSeed()+extension})
   }
 }
