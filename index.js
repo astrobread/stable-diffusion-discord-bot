@@ -14,6 +14,10 @@ const { ImgurClient } = require('imgur')
 const imgur = new ImgurClient({ clientId: config.imgurClientID})
 const imgbb = require("imgbb-uploader")
 const DIG = require("discord-image-generation")
+const sharp = require("sharp");
+const GIF = require("sharp-gif2");
+const Diff = require('diff');
+
 const log = console.log.bind(console)
 function debugLog(m){if(config.showDebug){log(m)}}
 const dJSON = require('dirty-json')
@@ -864,31 +868,89 @@ async function meme(prompt,urls,userid,channel){
     case 'invert': var img = await new DIG.Invert().getImage(urls[0]);break
     case 'sepia': var img = await new DIG.Sepia().getImage(urls[0]);break
     case 'animateseed':{
-      debugLog('l:' + queue.filter((j)=>j.seed==params[1]).length)
-      let urlseed=[]
-      // For animating a seed, the image replied to is the stopping mark
+      debugLog('Seed match count:' + queue.filter((j)=>j.seed==params[1]).length)
+      let urlseed=[] // prompt image urls
+      let promptseed = [] // prompt texts
+      let delay = parseInt(params[2]) || 1000 // delay between frames
+
+      // If command was replying to an image, consider that our stopping point.
       // So collect every image url for seed until we reach that end point
       var donemark = false; // did we hit the last frame
       var stopUrl = null; // image url that is our last frame to animate
       if (urls && urls.length > 0) { stopUrl = urls[0].split('/')[urls[0].split('/').length-1]; }
-      
+            
       // NOTE: My version doesn't filter on userid because intent is collaborative (take turns modding prompts, animate result)
-      //queue.filter((j)=>j.seed==params[1]&&j.userid===userid).forEach((j)=>{j.results.forEach((r)=>{urlseed.push(config.basePath+r.url.replace('outputs/',''))})})
-      queue.filter((j)=>j.seed==params[1]).forEach((j) => {
+      // Use slice to cap maximum frames, preferring more recent images
+      queue.filter((j)=>j.seed==params[1]).slice(-1 * maxAnimateImages).forEach((j) => {
         j.results.forEach((r) => {        
-          if (donemark) {return;}
+          // TODO: early exit feels awkward, maybe just do a normal loop with break?
+          if (donemark) {return;} // We're stopping early
           fileOnly = r.url.replace('outputs/','');
-          if (stopUrl == fileOnly) {donemark=true;}
+          if (stopUrl == fileOnly) {donemark=true;} // this is the last one
 
-          var seedUrl = config.basePath+fileOnly; // TODO: PATH OPERATION
+          var seedUrl = config.basePath+fileOnly; // TODO: Review OS compat path operations
           urlseed.push(seedUrl)
+          promptseed.push(r.metadata.image.prompt[0].prompt)
+          //debugLog(r.metadata.image.prompt[0].prompt)
         })
       })
-            
-      debugLog(urlseed)
-      var delay = parseInt(params[2]) || 1000
-	
-      if (urlseed.length>1){var img = await new DIG.Blink().getImage(delay, ...urlseed.slice(-1 * maxAnimateImages))}
+      if (urlseed.length>1) // At least two images to work with
+      {
+        let styledprompts = [promptseed[0]] // prefill first prompt
+        for (var i = 1; i < promptseed.length;i++) // start on second prompt
+        {
+          // Find differences between previous prompt and this one
+          // Chunks into unchanged/added/removed
+          const diff = Diff.diffWords(promptseed[i - 1], promptseed[i])
+          var updateprompt = ""
+          // Bring all chunks back together with styling based on type
+          diff.forEach((part) => {
+            if (part.added) {updateprompt += "<span foreground='green'><b><big>" + part.value + "</big></b></span>"}
+            else if (part.removed) {updateprompt += "<span foreground='red'><s>" + part.value + "</s></span>"}
+            else {updateprompt += part.value}
+          });
+          styledprompts.push(updateprompt)      	
+        }
+        // TODO: Better finisher ideas? Repeating last prompt in blue to signify the end
+        styledprompts.push("<span foreground='blue'>" + promptseed[promptseed.length - 1] + "</span>")
+        urlseed.push(urlseed[urlseed.length - 1])
+              
+        //debugLog(urlseed)
+              	
+      	let frameList = []
+      	for (var i = 0;i < urlseed.length;i++)
+      	{
+          // Add blank area for prompt text at bottom
+      		var res = sharp(urlseed[i]).extend({bottom: 200,background: 'white'});
+          // metadata will give wrong height value after our extend, reload it. Not too expensive
+          res = sharp(await res.toBuffer())
+          var metadata = await res.metadata();
+
+          // Create styled prompt text overlay
+          // TODO: Some height padding would be nice. Not as easy as width padding cuz of alignment
+          // WARN: Had no issue with font, but read about extra steps sometimes being necessary
+          const overlay = await sharp({
+              text: {
+                  text: styledprompts[i],
+                  rgba: true,
+                  width: metadata.width - 20,
+                  height: 200, 
+                  font: 'Arial',
+              },
+          }).png().toBuffer();
+		
+          // Combine the prompt overlay with prompt image
+          res = await res.composite([{ input: overlay, gravity: 'south' }])		
+
+          frameList.push(res);
+      	}
+      
+        // rgb444 format is way faster, slightly worse quality
+        // default takes almost a minute for 15 frames, versus a handful of seconds
+        // Does makes background a bit off-white sometimes
+      	var image = await GIF.createGif({delay:delay, format:"rgb444"}).addFrame(frameList).toSharp();
+      	img = await image.toBuffer()              	
+      }
       break
     }
     case 'animate':
