@@ -956,7 +956,22 @@ async function meme(prompt,urls,userid,channel){
     case 'animate':
     case 'blink': {
       if (urls.length>1){
-        var img = await new DIG.Blink().getImage(...urls.slice(-1 * maxAnimateImages))
+        let delay = parseInt(params[1]) || 1000 // delay between frames
+
+        frameList = []
+        try {
+          // sharp doesn't support URLs. I believe all blink items are URL, whereas animateseed uses
+          // only file paths
+          for (var i = 0; i < urls.length;i++)
+          {
+            const input = (await axios({ url: urls[i], responseType: "arraybuffer" })).data
+            frameList.push(sharp(input))
+          }
+          
+          var image = await GIF.createGif({delay:delay,format:"rgb444"}).addFrame(frameList).toSharp()
+          img = await image.toBuffer()
+        }
+        catch(err){console.error(err)} 
       }
       break
       } // Can take up to 10 images (discord limit) and make animations
