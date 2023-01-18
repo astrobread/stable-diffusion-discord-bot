@@ -14,9 +14,9 @@ const { ImgurClient } = require('imgur')
 const imgur = new ImgurClient({ clientId: config.imgurClientID})
 const imgbb = require("imgbb-uploader")
 const DIG = require("discord-image-generation")
-const sharp = require("sharp");
-const GIF = require("sharp-gif2");
-const Diff = require('diff');
+const sharp = require("sharp")
+const GIF = require("sharp-gif2")
+const Diff = require("diff")
 const log = console.log.bind(console)
 function debugLog(m){if(config.showDebug){log(m)}}
 const dJSON = require('dirty-json')
