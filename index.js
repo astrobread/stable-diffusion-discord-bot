@@ -13,10 +13,12 @@ const moment = require('moment')
 const { ImgurClient } = require('imgur')
 const imgur = new ImgurClient({ clientId: config.imgurClientID})
 const imgbb = require("imgbb-uploader")
-//const DIG = require("discord-image-generation")
-const sharp = require("sharp")
-const GIF = require("sharp-gif2")
-const Diff = require("diff")
+
+const DIG = require("discord-image-generation")
+const sharp = require("sharp");
+const GIF = require("sharp-gif2");
+const Diff = require('diff');
+
 const log = console.log.bind(console)
 function debugLog(m){if(config.showDebug){log(m)}}
 const dJSON = require('dirty-json')
@@ -65,6 +67,7 @@ const maxSteps = parseInt(config.maxSteps)||100
 const maxIterations = parseInt(config.maxIterations)||10
 const defaultMaxDiscordFileSize=parseInt(config.defaultMaxDiscordFileSize)||8000000  // TODO detect server boost status and increase this if boosted
 const basePath = config.basePath
+
 const maxAnimateImages = 100 // Only will fetch most recent X images for animating
 var rembg=config.rembg||'http://127.0.0.1:5000?url='
 var defaultModel=config.defaultModel||'stable-diffusion-1.5'
@@ -168,8 +171,6 @@ var slashCommands = [
         lexicaSearch(query,i.channel.id)
       }
     }
-  }
-]
 // If credits are active, add recharge otherwise don't include it
 if(!creditsDisabled)
 {
@@ -180,7 +181,6 @@ if(!creditsDisabled)
     execute: (i) => {if (i.member) {rechargePrompt(i.member.id,i.channel.id)} else if (i.user){rechargePrompt(i.user.id,i.channel.id)}}
   })
 }
-
 
 // Functions
 
@@ -565,6 +565,7 @@ function sendWebhook(job){ // TODO eris has its own internal webhook method, inv
     .catch((error) => {console.error(error)})
 }
 function postprocessingResult(data){ // TODO unfinished, untested, awaiting new invokeai api release
+  debugLog("postprocessingResult")  
   log(data)
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
@@ -575,8 +576,7 @@ function postprocessingResult(data){ // TODO unfinished, untested, awaiting new 
 function requestModelChange(newmodel){log('Requesting model change to '+newmodel);if(newmodel===undefined||newmodel==='undefined'){newmodel=defaultModel}socket.emit('requestModelChange',newmodel,()=>{log('requestModelChange loaded')})}
 function cancelRenders(){log('Cancelling current render'.bgRed);socket.emit('cancel');queue[queue.findIndex((q)=>q.status==='rendering')-1].status='cancelled';rendering=false}
 function generationResult(data){
-  //log('generation result')
-  //log(data)
+  debugLog("generationResult")
   var url=data.url
   url=config.basePath+data.url.split('/')[data.url.split('/').length-1]
   var job=queue[queue.findIndex(j=>j.status==='rendering')] // TODO there has to be a better way to know if this is a job from the web interface or the discord bot // upcoming invokeai api release solves this
@@ -599,10 +599,11 @@ function generationResult(data){
     job.results.push(data)
     postRender(postRenderObject)
   }else{rendering=false}
-  if(job&&job.results.length>=job.number){job.status='done';rendering=false;processQueue()}
+  if(job&&job.results.length>=job.number){job.status='done';dbWrite();rendering=false;processQueue()}
   if(dialogs.queue!==null){dialogs.queue.delete().catch((err)=>{}).then(()=>{dialogs.queue=null;intermediateImage=null;queueStatusLock=false})}
 }
 function initialImageUploaded(data){
+  debugLog("initialImageUploaded")
   var url=data.url
   var filename=config.basePath+"/"+data.url.replace('outputs/','')
   var id=data.url.split('/')[data.url.split('/').length-1].split('.')[0]
@@ -698,12 +699,13 @@ async function addRenderApi(id){
   }
 }
 async function postRender(render){
+  debugLog("postRender")
   try{fs.readFile(render.filename, null, function(err, data){
     if(err){console.error(err)}else{
       // TODO: OS agnostic folder seperators
       // NOTE: filename being wrong wasn't breaking because slashes get replaced automatically in createMessage, but makes filename long/ugly
-      filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","") // win
-      //filename=render.filename.split('/')[render.filename.split('/').length-1].replace(".png","") // lin
+      //filename=render.filename.split('\\')[render.filename.split('\\').length-1].replace(".png","") // win
+      filename=render.filename.split('/')[render.filename.split('/').length-1].replace(".png","") // lin
       var job=queue[queue.findIndex(x=>x.id===render.id)]
       var msg=':brain:<@'+job.userid+'>'
       msg+=':straight_ruler:`'+render.width+'x'+render.height+'`'
@@ -828,15 +830,22 @@ function lexicaSearch(query,channel){
 lexicaSearch=debounce(lexicaSearch,1000,true)
 
 async function meme(prompt,urls,userid,channel){
+  debugLog("meme")
+  debugLog(prompt)
+  debugLog(urls)
+
   params = prompt.split(' ')
   cmd = prompt.split(' ')[0]
   param = undefined
+
+  debugLog(params)
+
   switch(cmd){
     case 'blur':{var image=await jimp.read(urls[0]);image.blur(10);img=await image.getBufferAsync(jimp.MIME_PNG);break}
     case 'greyscale':{var image=await jimp.read(urls[0]);image.greyscale();img=await image.getBufferAsync(jimp.MIME_PNG);break}
     case 'invert':{var image=await jimp.read(urls[0]);image.invert();img=await image.getBufferAsync(jimp.MIME_PNG);break}
     case 'animateseed':{
-      //debugLog('Seed match count:' + queue.filter((j)=>j.seed==params[1]).length)
+      debugLog('Seed match count:' + queue.filter((j)=>j.seed==params[1]).length)
       let urlseed=[] // prompt image urls
       let promptseed = [] // prompt texts
       let delay = parseInt(params[2])||1000 // delay between frames
@@ -1014,6 +1023,7 @@ async function imgbbupload(file) {
     .catch((error)=>console.error(error))
 }
 function process (file){// Monitor new files entering watchFolder, post image with filename.
+  debugLog("process")
   try {
     if (file.endsWith('.png')||file.endsWith('jpg')){
       fs.readFile(file, null, function(err, data) {
@@ -1336,15 +1346,25 @@ bot.on("messageReactionAdd", async (msg,emoji,reactor) => {
       case '😂':
       case '👍':
       case '⭐':
-      case '❤️': log('Positive emojis'.green+emoji.name); break
+      case '❤️': 
+      {
+        // TODO: Add recording of favorites
+      	log('Positive emojis'.green+emoji.name);      	
+      	break
+      }
+
       case '✉️': log('sending image to dm'.dim);directMessageUser(targetUserId,{content: msg.content, embeds: embeds});break // todo debug occasional error about reactor.user.id undefined here
       case '👎':
       case '⚠️':
       case '🙈':
       case '❌':
       case '💩': {
-        log('Negative emojis'.red+emoji.name.red)
-        if(msg.content.includes(reactor.user.id)){msg.delete().catch(() => {})}
+        log('Negative emojis'.red+emoji.name.red); 
+        if(msg.content.includes(targetUserId))
+          {
+            debugLog("Deleting message!")
+            msg.delete().catch(() => {})
+          }
         break
       }
     }
@@ -1692,7 +1712,40 @@ bot.on("messageCreate", (msg) => {
       case '!leaveguild':{bot.leaveGuild(msg.content.split(' ')[1]);break}
       case '!getmessages':{var cid=msg.content.split(' ')[1];if(cid){bot.getMessages(cid).then(x=>{x.reverse();x.forEach((y)=>{log(y.author.username.bgBlue+': '+y.content);y.attachments.map((u)=>{return u.proxy_url}).forEach((a)=>{log(a)})})})};break}
       case '!updateslashcommands':{bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
-      case '!deleteslashcommands':{bot.bulkEditCommands([]);bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
+      case '!deleteslashcommands':
+      {
+        // NOTE: Discord can enforce a 1-2 hour delay in updating commands
+        // This is an attempt at improving command updating before I knew the above.
+        // So it's possible the original method works but I was unable to verify.
+        
+        // This is to support having Model as a selection instead of free-form text.
+        // Models aren't known until talking to Invoke, so admin needs to kick this off
+        // to refresh the command once we know the list of models
+        
+	//bot.bulkEditCommands([]);
+	bot.getCommands().then(cmds=>
+	{
+	  const delCmds = cmds.map((c) => bot.deleteCommand(c.id)); // get all delete commands
+          Promise.all(delCmds).then(() => // once all deletes are done
+	  {	
+             debugLog("rebuilding commands");
+
+             if (models) // We've populated models so push them into the command
+             {
+               var modelCmd = slashCommands[0].options.filter((c) => c.name === 'model')[0]; // get dream command option 'model'
+               modelCmd.choices = Object.keys(models).map((m) => {return { name: m, value: m }});
+               debugLog(modelCmd.choices)
+             }
+			
+             bot.commands = new Collection();
+             for (const c of slashCommands) {			
+               bot.commands.set(c.name, c);
+               bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})
+             }
+           });
+	});
+	break
+      }
       case '!randomisers':{
         var newMsg='**Currently loaded randomisers**\n'
         for (r in randoms){newMsg+='`{'+randoms[r]+'}`='+getRandom(randoms[r])+'\n'}
@@ -1756,6 +1809,7 @@ socket.on('error', (error) => {
   var nowJob=queue[queue.findIndex((j)=>j.status==="rendering")]
   if(nowJob){
     log('Failing status for:');nowJob.status='failed';log(nowJob)
+    dbWrite();
     chatChan(nowJob.channel,':warning: <@'+nowJob.userid+'>, there was an error in your request with prompt: `'+nowJob.prompt+'`\n**Error:** `'+error.message+'`\n')
   }
   rendering=false
