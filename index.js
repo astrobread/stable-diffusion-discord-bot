@@ -13,7 +13,6 @@ const moment = require('moment')
 const { ImgurClient } = require('imgur')
 const imgur = new ImgurClient({ clientId: config.imgurClientID})
 const imgbb = require("imgbb-uploader")
-
 const DIG = require("discord-image-generation")
 const sharp = require("sharp");
 const GIF = require("sharp-gif2");
@@ -171,6 +170,8 @@ var slashCommands = [
         lexicaSearch(query,i.channel.id)
       }
     }
+  }
+]
 // If credits are active, add recharge otherwise don't include it
 if(!creditsDisabled)
 {
