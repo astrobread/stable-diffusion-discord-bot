@@ -50,7 +50,7 @@ if(config.hivePaymentAddress.length>0 && !creditsDisabled){
   cron.schedule('0 */12 * * *', () => { log('Recharging users with no credit every 12 hrs'.bgCyan.bold); freeRecharge() }) // Comment this out if you don't want free regular topups of low balance users
 }
 const bot = new Eris.CommandClient(config.discordBotKey, {
-  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "guildMessageReactions"],
+  intents: ["guilds", "guildMessages", "messageContent", "guildMembers", "directMessages", "guildMessageReactions", "directMessageReactions"],
   description: "Just a slave to the art, maaan",
   owner: "ausbitbank",
   prefix: "!",
@@ -891,7 +891,7 @@ async function meme(prompt,urls,userid,channel){
           // Create styled prompt text overlay
           // TODO: Some height padding would be nice. Not as easy as width padding cuz of alignment
           // WARN: Had no issue with font, but read about extra steps sometimes being necessary
-          styledprompts[i]=styledprompts[i].replace('&','') // stop crash from invalid markup
+          styledprompts[i]=styledprompts[i].replace('&','') // stop crash from invalid markup          
           const overlay = await sharp({
               text: {
                   text: styledprompts[i],
