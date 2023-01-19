@@ -1712,22 +1712,24 @@ bot.on("messageCreate", (msg) => {
       case '!leaveguild':{bot.leaveGuild(msg.content.split(' ')[1]);break}
       case '!getmessages':{var cid=msg.content.split(' ')[1];if(cid){bot.getMessages(cid).then(x=>{x.reverse();x.forEach((y)=>{log(y.author.username.bgBlue+': '+y.content);y.attachments.map((u)=>{return u.proxy_url}).forEach((a)=>{log(a)})})})};break}
       case '!updateslashcommands':{bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
+      // Does nothing
+      //case '!deleteslashcommands':{bot.bulkEditCommands([]);bot.getCommands().then(cmds=>{bot.commands = new Collection();for (const c of slashCommands) {bot.commands.set(c.name, c);bot.createCommand({name: c.name,description: c.description,options: c.options ?? [],type: Constants.ApplicationCommandTypes.CHAT_INPUT})}});break}
       case '!deleteslashcommands':
       {
         // NOTE: Discord can enforce a 1-2 hour delay in updating commands
-        // This is an attempt at improving command updating before I knew the above.
-        // So it's possible the original method works but I was unable to verify.
+        // This actually enforces remaking slash commands unlike previous method
+        // After initial delay, commands might fail for a few minutes before updating
         
         // This is to support having Model as a selection instead of free-form text.
         // Models aren't known until talking to Invoke, so admin needs to kick this off
         // to refresh the command once we know the list of models
         
-	//bot.bulkEditCommands([]);
-	bot.getCommands().then(cmds=>
-	{
-	  const delCmds = cmds.map((c) => bot.deleteCommand(c.id)); // get all delete commands
-          Promise.all(delCmds).then(() => // once all deletes are done
-	  {	
+        //bot.bulkEditCommands([]);
+        bot.getCommands().then(cmds=>
+        {
+          const delCmds = cmds.map((c) => bot.deleteCommand(c.id)); // get all delete commands
+                Promise.all(delCmds).then(() => // once all deletes are done
+          {	
              debugLog("rebuilding commands");
 
              if (models) // We've populated models so push them into the command
